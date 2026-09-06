@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Antarctic Navigator</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+<header class="app-header"><div class="brand"><span class="brand-mark">◆</span><div><h1>Antarctic Navigator</h1><p>Sea-ice · iceberg trajectory · route decision support · SIH26059</p></div></div><div class="status" id="status-indicator"><span class="dot"></span><span id="status-text">Loading…</span></div></header>
+<div class="app-body">
+<aside class="panel">
+<section class="panel-section"><h2>Forecast horizon</h2><input type="range" id="horizon-slider" min="1" max="7" value="3"><div class="slider-label"><span id="horizon-value">3</span> day(s) ahead</div></section>
+<section class="panel-section"><h2>Vessel profile</h2><select id="vessel-profile"><option value="standard">Standard vessel</option><option value="ice_capable">Ice-capable vessel</option></select><p class="hint">Changes route tolerance to concentrated ice and moving iceberg risk.</p></section>
+<section class="panel-section"><h2>Indian Antarctic stations</h2><div class="station-buttons"><button class="station-btn" data-station="Maitri">Use Maitri</button><button class="station-btn" data-station="Bharati">Use Bharati</button></div><p class="hint">First click sets start; second sets destination.</p></section>
+<section class="panel-section"><h2>Route planner</h2><p class="hint">Click map for start and destination, or use the station buttons.</p><div class="route-points"><div><span class="label">Start</span><span id="start-coord">—</span></div><div><span class="label">Destination</span><span id="goal-coord">—</span></div></div><div class="route-actions"><button id="compute-route-btn" disabled>Compute route</button><button id="clear-route-btn" class="secondary">Clear</button></div><div id="route-result" class="route-result"></div></section>
+<section class="panel-section"><h2>Tracked icebergs <span id="iceberg-count" class="badge">0</span></h2><div id="iceberg-list" class="iceberg-list"></div></section>
+<section class="panel-section legend"><h2>Sea-ice concentration</h2><div class="legend-scale"></div><div class="legend-labels"><span>0%</span><span>50%</span><span>100%</span></div><p class="source-note" id="source-note"></p></section>
+</aside>
+<main class="map-wrap"><div id="map"></div><div class="map-overlay"><span id="forecast-label">Forecast day +3</span><span>·</span><span id="dataset-label">Synthetic demo</span></div></main>
+</div></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script src="app.js"></script>
+</body></html>
