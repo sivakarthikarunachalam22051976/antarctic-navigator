@@ -1,0 +1,2 @@
+# Real-data runtime directory. The raw/ and historical/ subdirectories are ignored.
+# The compact navigator_bundle.json may be committed for the SIH prototype deployment.
