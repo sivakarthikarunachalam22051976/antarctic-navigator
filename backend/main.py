@@ -40,10 +40,15 @@ app = FastAPI(
 # CORS
 # ---------------------------------------------------------------------------
 
-frontend_url = os.getenv("FRONTEND_URL", "").strip().rstrip("/")
+# Local development plus the public Vercel production/preview origins.
+# FRONTEND_URL may optionally contain one or more comma-separated origins
+# (for example, a production Vercel URL and a custom domain).
+frontend_url = os.getenv("FRONTEND_URL", "")
+
 allowed_origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "https://antarctic-navigator.vercel.app",
 ]
 
 for origin in frontend_url.split(","):
@@ -54,8 +59,12 @@ for origin in frontend_url.split(","):
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
+    # Allow Vercel preview deployments for this project without opening
+    # CORS to arbitrary origins. The exact production URL remains listed
+    # above.
+    allow_origin_regex=r"^https://antarctic-navigator-[a-z0-9-]+\.vercel\.app$",
     allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -452,6 +461,7 @@ def root() -> dict[str, str]:
 
 def _data_status_from_meta(meta: dict[str, Any]) -> dict[str, Any]:
     """Return a structured provenance/freshness view for the current bundle."""
+
     def _source_block(
         source: str,
         observation_date: str,
@@ -467,65 +477,39 @@ def _data_status_from_meta(meta: dict[str, Any]) -> dict[str, Any]:
             "status": status,
         }
 
-    sea_ice_source = str(
-        meta.get("source", "")
-    )
-    sea_ice_date = str(
-        meta.get("observation_date", "")
-    )
+    sea_ice_source = str(meta.get("source", ""))
+    sea_ice_date = str(meta.get("observation_date", ""))
     sea_ice_retrieved = str(
         meta.get("sea_ice_retrieved_at_utc")
         or meta.get("data_accessed_utc", "")
     )
 
-    iceberg_source = str(
-        meta.get("iceberg_source", "")
-    )
-    iceberg_date = str(
-        meta.get("iceberg_observation_date", "")
-    )
-    iceberg_retrieved = str(
-        meta.get("iceberg_retrieved_at_utc", "")
-    )
-    iceberg_count = int(
-        meta.get("iceberg_records_used", 0) or 0
+    iceberg_source = str(meta.get("iceberg_source", ""))
+    iceberg_date = str(meta.get("iceberg_observation_date", ""))
+    iceberg_retrieved = str(meta.get("iceberg_retrieved_at_utc", ""))
+    iceberg_count = int(meta.get("iceberg_records_used", 0) or 0)
+
+    current_source = str(meta.get("current_source", ""))
+    current_date = str(meta.get("current_observation_date", ""))
+    current_retrieved = str(meta.get("current_retrieved_at_utc", ""))
+
+    wind_source = str(meta.get("wind_source", ""))
+    wind_date = str(meta.get("wind_observation_date", ""))
+    wind_retrieved = str(meta.get("wind_retrieved_at_utc", ""))
+
+    forcing = str(meta.get("environmental_forcing", ""))
+    real_bundle = bool(str(meta.get("dataset_kind", "")).startswith("real_"))
+
+    bundle_generated_at = str(
+        meta.get("bundle_generated_at_utc")
+        or meta.get("data_accessed_utc", "")
     )
 
-    current_source = str(
-        meta.get("current_source", "")
-    )
-    current_date = str(
-        meta.get("current_observation_date", "")
-    )
-    current_retrieved = str(
-        meta.get("current_retrieved_at_utc", "")
-    )
-
-    wind_source = str(
-        meta.get("wind_source", "")
-    )
-    wind_date = str(
-        meta.get("wind_observation_date", "")
-    )
-    wind_retrieved = str(
-        meta.get("wind_retrieved_at_utc", "")
-    )
-
-    forcing = str(
-        meta.get("environmental_forcing", "")
-    )
-    real_bundle = bool(
-        meta.get("dataset_kind", "").startswith("real_")
-    )
-
+    # Keep both the structured source blocks and the simple top-level fields
+    # used by earlier frontend builds.
     return {
-        "bundle_generated_at_utc": str(
-            meta.get("bundle_generated_at_utc")
-            or meta.get("data_accessed_utc", "")
-        ),
-        "dataset_kind": meta.get(
-            "dataset_kind", "unknown"
-        ),
+        "bundle_generated_at_utc": bundle_generated_at,
+        "dataset_kind": meta.get("dataset_kind", "unknown"),
         "routing_status": (
             "All available real environmental inputs loaded"
             if forcing and "none" not in forcing.lower()
@@ -554,17 +538,27 @@ def _data_status_from_meta(meta: dict[str, Any]) -> dict[str, Any]:
                 current_source,
                 current_date,
                 current_retrieved,
-                "available" if current_source else "not_connected",
+                "available" if current_source and current_date else "not_connected",
                 "OCEAN CURRENTS",
             ),
             "wind": _source_block(
                 wind_source,
                 wind_date,
                 wind_retrieved,
-                "available" if wind_source else "not_connected",
+                "available" if wind_source and wind_date else "not_connected",
                 "WIND",
             ),
         },
+        "environmental_forcing": forcing or "none",
+        "observation_date": sea_ice_date,
+        "sea_ice_observation_date": sea_ice_date,
+        "sea_ice_retrieved_at_utc": sea_ice_retrieved,
+        "iceberg_observation_date": iceberg_date,
+        "iceberg_retrieved_at_utc": iceberg_retrieved,
+        "current_observation_date": current_date,
+        "current_retrieved_at_utc": current_retrieved,
+        "wind_observation_date": wind_date,
+        "wind_retrieved_at_utc": wind_retrieved,
     }
 
 
@@ -638,151 +632,6 @@ def demo() -> dict[str, Any]:
         "stations": _station_config(),
         "vessel_profiles": list(VESSEL_PROFILES),
     }
-
-@app.get('/api/data-status')
-def data_status():
-    d = get_dataset()
-    meta = d['meta']
-
-    return {
-        "dataset_kind": meta.get("dataset_kind", "unknown"),
-        "environmental_forcing": meta.get(
-            "environmental_forcing",
-            "none"
-        ),
-
-        "bundle_generated_at_utc": meta.get(
-            "bundle_generated_at_utc",
-            ""
-        ),
-
-        "sea_ice": {
-            "source": meta.get(
-                "source",
-                "NOAA/NSIDC G10016 Version 4"
-            ),
-            "dataset": meta.get(
-                "sea_ice_dataset",
-                "G10016"
-            ),
-            "version": meta.get(
-                "sea_ice_version",
-                "4"
-            ),
-            "observation_date": meta.get(
-                "observation_date",
-                ""
-            ),
-            "retrieved_at_utc": meta.get(
-                "sea_ice_retrieved_at_utc",
-                ""
-            ),
-            "source_file": meta.get(
-                "source_file",
-                ""
-            ),
-        },
-
-        "icebergs": {
-            "source": meta.get(
-                "iceberg_source",
-                "U.S. National Ice Center (USNIC)"
-            ),
-            "observation_date": meta.get(
-                "iceberg_observation_date",
-                ""
-            ),
-            "retrieved_at_utc": meta.get(
-                "iceberg_retrieved_at_utc",
-                ""
-            ),
-            "source_file": meta.get(
-                "iceberg_source_file",
-                ""
-            ),
-            "records_used": meta.get(
-                "iceberg_records_used",
-                len(d.get("icebergs", []))
-            ),
-        },
-
-        "currents": {
-            "source": meta.get(
-                "current_source",
-                "NASA/JPL PO.DAAC OSCAR NRT V2.0"
-            ),
-            "observation_date": meta.get(
-                "current_observation_date",
-                ""
-            ),
-            "retrieved_at_utc": meta.get(
-                "current_retrieved_at_utc",
-                ""
-            ),
-            "source_file": meta.get(
-                "current_source_file",
-                ""
-            ),
-        },
-
-        "wind": {
-            "source": meta.get(
-                "wind_source",
-                "Copernicus/ECMWF ERA5"
-            ),
-            "analysis_date": meta.get(
-                "wind_observation_date",
-                ""
-            ),
-            "retrieved_at_utc": meta.get(
-                "wind_retrieved_at_utc",
-                ""
-            ),
-            "source_file": meta.get(
-                "wind_source_file",
-                ""
-            ),
-        },
-
-        # Compatibility fields for simpler frontend consumers.
-        "observation_date": meta.get(
-            "observation_date",
-            ""
-        ),
-        "sea_ice_observation_date": meta.get(
-            "observation_date",
-            ""
-        ),
-        "sea_ice_retrieved_at_utc": meta.get(
-            "sea_ice_retrieved_at_utc",
-            ""
-        ),
-        "iceberg_observation_date": meta.get(
-            "iceberg_observation_date",
-            ""
-        ),
-        "iceberg_retrieved_at_utc": meta.get(
-            "iceberg_retrieved_at_utc",
-            ""
-        ),
-        "current_observation_date": meta.get(
-            "current_observation_date",
-            ""
-        ),
-        "current_retrieved_at_utc": meta.get(
-            "current_retrieved_at_utc",
-            ""
-        ),
-        "wind_observation_date": meta.get(
-            "wind_observation_date",
-            ""
-        ),
-        "wind_retrieved_at_utc": meta.get(
-            "wind_retrieved_at_utc",
-            ""
-        ),
-    }
-
 
 @app.get("/api/seaice/grid")
 def seaice_grid() -> dict[str, Any]:
