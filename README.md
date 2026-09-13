@@ -1,165 +1,289 @@
-# Antarctic Navigator — Sea-Ice & Iceberg Navigation Decision Support System
+# Antarctic Navigator — Ultimate Mission-Aware Polar Decision-Support Prototype
 
-SIH26059 · Ministry of Earth Sciences · Software
+**Build: v0.5.0 · SIH26059**
 
-Fuses sea-ice concentration forecasts, iceberg drift projections, and
-vessel-specific ice tolerance into a risk-aware route between two points —
-by default, between India's Maitri and Bharati Antarctic research stations.
+**SIH26059 · Software**
 
-## Positioning note (read this before your PPT)
+Antarctic Navigator is a decision-support prototype for Antarctic logistics. It combines sea-ice concentration, iceberg observations, simplified iceberg drift physics, vessel-specific routing costs, and risk-aware A* pathfinding.
 
-Don't pitch this as "nobody has built polar route planning before" — that's
-false and a judge can find it in one search. The British Antarctic Survey's
-**PolarRoute** (open source, `pip install polar-route`) and the commercial
-**IcySea** app both do related things. Your defensible differentiator is:
-this is an **India-specific, explainable, offline-capable workflow** built
-around Indian Antarctic Programme logistics (Maitri/Bharati), not a claim
-that route optimization itself is novel. Say that directly if asked.
+## Real-data integrity
 
-## What's real and what's simplified (read this next)
+Real source-derived data is the production default (`USE_REAL_DATA=1`). The backend will not silently substitute the synthetic fixture. If the real bundle is missing, startup fails unless an operator explicitly sets `ALLOW_SYNTHETIC_FALLBACK=1` for offline software testing. The packaged real bundle contains NSIDC G10016 v4 sea ice, USNIC iceberg observations, OSCAR NRT currents and ERA5 wind metadata.
 
-- **Drift physics** is a simplified free-drift approximation (current +
-  wind rotated by an empirical Coriolis deflection angle), inspired by but
-  not equal to the full Bigg et al. (1997) iceberg dynamics model. Cite
-  Bigg et al. as the fuller model this approximates.
-- **Sea-ice forecasting** is a lightweight, explainable persistence-based
-  baseline, not a trained ML/physical model. The forecast horizon slider
-  does genuinely re-query and re-render a different forecast field, but day-
-  to-day change is intentionally subtle (a few tenths of a percent) — this
-  is a transparent baseline, not a dramatic prediction engine. Say so if asked.
-- **Only the sea-ice layer has a real-data path wired up currently.** Wind,
-  current, and iceberg fields are synthetic even when you load real NSIDC
-  sea-ice data — `convert_nsidc_bundle.py` says so explicitly in its output
-  metadata (`dataset_kind: real_seaice_only`). Don't claim an all-real
-  pipeline until you've actually built adapters for the other three.
-- Ships with a **synthetic offline dataset** by default so the whole system
-  runs with zero API keys and zero internet dependency — critical for demo
-  reliability at a venue with unreliable wifi.
+Synthetic data remains in the repository only for deterministic automated tests and offline development.
+
+## What the complete build supports
+
+This package is the Antarctic Navigator codebase upgraded with selected, defensible capabilities observed in a separate public SIH26059 reference implementation. It does **not** copy that project's code, synthetic environmental fields, trained weights, or unsupported performance claims. The production/demo path remains grounded in the packaged source-derived real-data bundle.
+
+- **NSIDC G10016 Version 4** — current near-real-time Antarctic sea-ice input.
+- **USNIC Antarctic Icebergs** — current weekly iceberg observations.
+- **OSCAR NRT V2.0** — optional real surface-current forcing for iceberg drift.
+- **ERA5 10-m winds** — optional recent/reanalysis wind forcing for iceberg drift; this is not an instantaneous live forecast.
+- **Transparent sea-ice forecast baseline** — short horizon, not a trained ML model.
+- **RK4 iceberg drift + uncertainty ensemble** — fourth-order numerical integration of the transparent free-drift field, with a small screening ensemble around the projected position.
+- **Physics-informed vessel performance** — transparent Lindqvist-inspired ice-resistance scaling estimates attainable speed degradation by vessel profile; it is clearly labelled as a planning model, not a certified hull-performance model.
+- **Polar safety screening** — vessel ice-class/concentration screening inspired by the POLARIS concept, explicitly marked as non-regulatory and not a full POLARIS implementation.
+- **EPSG:3031 geometry** — Antarctic polar stereographic coordinates are available for route endpoints and future polar map upgrades while the current Leaflet UI remains simple and familiar.
+- **Risk-weighted A*** — partial sea ice receives a steep cost; 100% concentration cells remain hard exclusions; route results include an environmental-exposure assessment.
+- **Mission-aware route alternatives** — returns Route A (Safest), Route B (Fastest) and Route C (Balanced), then recommends the best candidate for the selected mission and operational priority.
+- **Explainable route reasoning** — exposes risk score, distance versus shortest, ice/iceberg exposure, selected constraints, source dates, and a concise "Why selected?" explanation.
+- **Voyage intelligence simulator** — the selected route can be replayed as a vessel-performance estimate with model ETA, attainable speed, environmental alerts, and a clearly labelled fuel-consumption proxy.
+- **Human-in-the-loop decision support** — operators choose mission, vessel, priority, maximum acceptable ice exposure, and data-freshness requirement; the system does not autonomously control a vessel.
+- **G10016 surface mask** — when present, the converter protects routing from land/coast cells.
+- **G02202 Version 6** — historical sea-ice validation/backtesting source.
+- **BYU/NIC v8.0** — historical iceberg-track validation/backtesting source.
+- **Synthetic fallback** — fully offline demo data remains bundled for reliability.
+- **Offline-first architecture** — no external API key is required for the core demo; the real-data bundle can be refreshed separately when connectivity is available.
+
+## Data-status honesty
+
+The API/UI reports the actual data basis instead of calling every run "live":
+
+- `synthetic` — offline bundled demo data.
+- `real_seaice_only` — real NSIDC sea ice without a current USNIC CSV.
+- `real_seaice_usnic_icebergs` — real NSIDC sea ice + current USNIC observations.
+- `environmental_forcing` — explicitly states whether OSCAR currents and/or ERA5 wind are present.
+- `trajectory_basis` — explains whether the drift projection is externally forced or stationary fallback.
+- Per-source observation/update dates + retrieval timestamps — used by `/api/data-status` and the dashboard freshness panel.
+
+## Current vs historical data
+
+```text
+CURRENT
+NSIDC G10016 v4 ──→ sea ice
+USNIC ─────────────→ current iceberg observations
+OSCAR NRT ─────────→ optional current forcing
+ERA5 ──────────────→ optional recent/reanalysis wind
+
+HISTORICAL / VALIDATION
+NSIDC G02202 v6 ───→ historical sea-ice evaluation
+BYU/NIC v8.0 ──────→ historical iceberg tracks
+```
 
 ## Project structure
 
-```
+```text
 antarctic-navigator/
 ├── backend/
-│   ├── main.py                       # FastAPI app + routes
-│   ├── config.py                     # Grid bounds + Maitri/Bharati coordinates
+│   ├── main.py
+│   ├── config.py
+│   ├── requirements.txt
 │   ├── models/
-│   │   ├── drift_model.py            # Iceberg free-drift physics
-│   │   ├── seaice_forecast.py        # Sea-ice concentration forecast baseline
-│   │   └── router.py                 # A* routing, vessel profiles, iceberg risk cost
+│   │   ├── drift_model.py
+│   │   ├── polar_intelligence.py
+│   │   ├── router.py
+│   │   └── seaice_forecast.py
 │   └── data/
-│       ├── sample_data_generator.py  # Generates the synthetic demo dataset
-│       ├── fetch_real_data.py        # Downloads real NSIDC data (needs Earthdata login)
-│       ├── convert_nsidc_bundle.py   # Converts downloaded NetCDF into the app's bundle format
-│       └── sample/                   # Pre-generated synthetic data (ready to run)
+│       ├── sample_data_generator.py
+│       ├── fetch_real_data.py
+│       ├── fetch_usnic_icebergs.py
+│       ├── fetch_oscar_currents.py
+│       ├── fetch_era5_wind.py
+│       ├── fetch_byu_historical.py
+│       ├── validate_byu_historical.py
+│       ├── convert_nsidc_bundle.py
+│       ├── integrate_usnic_icebergs.py
+│       ├── sample/
+│       ├── real/
+│       └── test/
 ├── frontend/
 │   ├── index.html
+│   ├── app.js
 │   ├── style.css
-│   └── app.js                        # Leaflet dashboard: stations, vessel profile, route planner
+│   ├── package.json
+│   ├── package-lock.json
+│   ├── vite.config.js
+│   └── .env
 ├── docs/
-│   ├── DATA_SOURCES.md               # Real data sources + how to plug them in
-│   ├── VALIDATION.md                 # What was actually checked in this build, and what wasn't
-│   ├── PPT_SLIDE_GUIDE.md            # Slide-by-slide SIH presentation guidance
-│   └── SCALABILITY.md                # Production scaling architecture notes
 ├── scripts/
-│   └── smoke_test.py                 # End-to-end model pipeline check (Maitri → Bharati route)
-├── requirements.txt
-└── README.md
+├── render.yaml
+└── requirements.txt
 ```
 
-## Setup
+## Local setup — Windows PowerShell
 
-### Windows PowerShell note (read this if you saw a numpy build error)
-
-If `pip install` tried to compile numpy from source and failed with a
-"meson"/"Unknown compiler" error, that means numpy couldn't find a
-prebuilt wheel for your Python version — usually because you're on a very
-new Python release (3.14+) and an old pinned version doesn't publish
-wheels for it yet. `requirements.txt` now uses minimum-version bounds
-(`numpy>=2.1`, etc.) instead of exact pins specifically to avoid this —
-pip will pick whatever current wheel actually supports your Python
-version. If you still hit a build error, upgrade pip first
-(`python -m pip install --upgrade pip`) and retry.
-
-Also: PowerShell doesn't have a `source` command (that's bash). Use the
-PowerShell-native activation command below.
-
-### 1. Backend
+From the repository root:
 
 ```powershell
-cd antarctic-navigator-v2-final\backend
-
-python -m venv venv
 .\venv\Scripts\Activate.ps1
-# If PowerShell blocks script execution, run this once first:
-#   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+pip install -r requirements.txt
+python scripts\self_check.py
+```
 
-pip install --upgrade pip
-pip install -r ..\requirements.txt
+Start backend:
 
-python data\sample_data_generator.py   # only needed once, already pre-run
-
+```powershell
+cd backend
 fastapi dev main.py
 ```
 
-macOS/Linux equivalent:
+In a second terminal:
 
-```bash
-cd antarctic-navigator-v2-final/backend
-python -m venv venv
-source venv/bin/activate
-pip install --upgrade pip
-pip install -r ../requirements.txt
-python data/sample_data_generator.py
-fastapi dev main.py
-```
-
-`fastapi dev` (from the `fastapi[standard]` package) runs on
-http://localhost:8000 with auto-reload — same idea as `uvicorn --reload`,
-just the newer built-in CLI. Check http://localhost:8000/docs for
-interactive API docs — worth showing judges live.
-
-Sanity-check the whole model pipeline without starting a server (works
-from any directory — it locates `backend/` relative to its own file path):
-
-```bash
-python scripts/smoke_test.py
-```
-
-### 2. Frontend — Vite on port 5173
-
-```bash
-cd antarctic-navigator-v2-final/frontend
+```powershell
+cd frontend
 npm install
 npm run dev
 ```
 
-Open http://localhost:5173. Use the station buttons (Maitri / Bharati) for
-a one-click demo route, or click anywhere on the map to set custom points.
+Open:
 
-(The plain `python -m http.server` approach still works too if you'd
-rather skip npm entirely — either serves the same static files.)
-
-### 3. Switching to real sea-ice data
-
-Run these from inside `backend/` (same folder as `main.py`):
-
-```bash
-export NSIDC_SHORT_NAME=G10016    # near-real-time; use G02202 for the final, more-delayed CDR
-python data/fetch_real_data.py       # prompts for free NASA Earthdata login
-python data/convert_nsidc_bundle.py  # reprojects onto the app's grid
-export USE_REAL_DATA=1
-fastapi dev main.py
+```text
+http://localhost:5173
 ```
 
-See `docs/DATA_SOURCES.md` for what's real vs. synthetic in that path, and
-`docs/VALIDATION.md` for exactly what has and hasn't been checked in this
-build.
+Backend health:
 
-## Extra packages needed
+```text
+http://127.0.0.1:8000/api/health
+```
 
-Everything is in `requirements.txt`, including `pyproj` (for the real-data
-coordinate reprojection in `convert_nsidc_bundle.py`) and `cdsapi` (if you
-add real ECMWF ERA5 wind data — see `docs/DATA_SOURCES.md`). One
-`pip install -r requirements.txt` covers all of it — no separate manual
-installs.
+API docs:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+## Current real-data workflow
+
+### NSIDC sea ice
+
+```powershell
+python backend\data\fetch_real_data.py
+```
+
+### USNIC current icebergs
+
+```powershell
+python backend\data\fetch_usnic_icebergs.py
+```
+
+### Optional OSCAR currents
+
+Requires your NASA Earthdata Login for PO.DAAC protected data access:
+
+```powershell
+python backend\data\fetch_oscar_currents.py
+```
+
+### Optional ERA5 wind
+
+Requires a Copernicus CDS account, API token/configuration, and acceptance of the dataset terms:
+
+```powershell
+python backend\data\fetch_era5_wind.py
+```
+
+### Convert all available current data into the compact application bundle
+
+```powershell
+python backend\data\convert_nsidc_bundle.py
+python scripts\validate_real_bundle.py
+```
+
+The compact bundle is:
+
+```text
+backend/data/real/navigator_bundle.json
+```
+
+## Daily refresh for the SIH prototype
+
+Refresh current real data (NSIDC + USNIC):
+
+```powershell
+.\scripts\daily_refresh.ps1
+```
+
+To include OSCAR currents and ERA5 wind in the same refresh, enable both for the PowerShell session first:
+
+```powershell
+$env:ANTARCTIC_ENABLE_OSCAR="1"
+$env:ANTARCTIC_ENABLE_ERA5="1"
+.\scripts\daily_refresh.ps1
+```
+
+The refresh script converts and validates the compact bundle after the downloads complete. If either optional source fails, the existing cached source file is preserved and the converter can continue with whatever validated forcing is available.
+
+After the bundle validates:
+
+```powershell
+git add backend\data\real\navigator_bundle.json
+git commit -m "Update Antarctic environmental data"
+git push
+```
+
+## Historical validation data
+
+Download the current BYU/NIC consolidated archive:
+
+```powershell
+python backend\data\fetch_byu_historical.py
+```
+
+Validate the extracted collection:
+
+```powershell
+python backend\data\validate_byu_historical.py
+```
+
+Historical data is kept separate from current operational inputs.
+
+## Frontend route-decision UI (fixed package)
+
+The shipped frontend is the mission-aware UI and must display:
+
+- Route A — Safest
+- Route B — Fastest
+- Route C — Balanced
+- Recommended Route
+- Why selected? explanation
+
+The route comparison is rendered as a compact table, and Data freshness & provenance is rendered as a source table with data date, retrieval time, and status. The old single-line `Risk-weighted route found ...` presentation is not part of this package.
+
+If a local browser still shows the old single-route message, it is serving an older frontend copy. Stop the old Vite process, open this package's `frontend` directory, install dependencies, and restart Vite:
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+Then hard-refresh the browser (`Ctrl+Shift+R`). Confirm that the page contains the **Mission-aware routing** controls and the map legend **A Safest · B Fastest · C Balanced**.
+
+The backend must also be the `backend/main.py` shipped in this package. From the `backend` directory, `http://127.0.0.1:8000/` should return the API service status rather than 404.
+
+## Deployment
+
+See `docs/DEPLOYMENT.md` for the GitHub → Render → Vercel setup.
+
+The included `render.yaml` configures a Python backend rooted at `backend`, serves the committed real-data bundle (`USE_REAL_DATA=1`), and uses `On Commit` deployment with `/api/health` health checks.
+
+## Validation and scientific limitations
+
+Run:
+
+```powershell
+python scripts\self_check.py
+```
+
+Software checks validate the bundled prototype and parser/regridding logic. Scientific/operational accuracy still requires historical backtesting, uncertainty calibration, vessel-performance validation, and domain review.
+
+This is decision-support software, not certified maritime navigation software.
+
+
+## Why these additions were selected
+
+| Capability | Antarctic Navigator | Added from reference idea | Data/claim boundary |
+|---|---|---|---|
+| Real environmental bundle | Yes | — | NSIDC + USNIC + OSCAR + ERA5 |
+| Mission-aware A/B/C routing | Yes | — | Same A* engine, different objectives |
+| RK4 iceberg drift | Yes | Yes | Physics-informed, not operationally validated |
+| Uncertainty ensemble | Yes | Yes | Screening uncertainty, not calibrated probability |
+| Vessel performance | Yes | Yes | Planning approximation, not certified hull performance |
+| POLARIS layer | Screening | Yes | Reference/screening only, not regulatory certification |
+| EPSG:3031 geometry | Yes | Yes | Endpoint/path geometry support |
+| Voyage simulation | Yes | Yes | ETA/fuel planning proxy, not measured savings |
+| Synthetic-trained ML models | No | Deliberately excluded | Avoids presenting unvalidated/synthetic-trained AI as operational |
+| Full autonomous navigation | No | Deliberately excluded | Human operator remains in control |
+

@@ -22,7 +22,14 @@ from config import (
     latlon_to_rc,
     rc_to_latlon,
 )
-from models.drift_model import advect_iceberg
+from models.drift_model import advect_iceberg, project_iceberg_rk4
+from models.polar_intelligence import (
+    ADVANCED_VESSELS,
+    attainable_speed_kn,
+    polar_safety_screen,
+    polar_stereographic_xy,
+    simulate_voyage,
+)
 from models.router import (
     ICE_EXPOSURE_LIMITS,
     MISSION_PROFILES,
@@ -37,7 +44,7 @@ from models.seaice_forecast import forecast_concentration
 
 app = FastAPI(
     title="Antarctic Navigator API",
-    version="1.4.0",
+    version="1.5.0",
     description=(
         "Predictive and physics-informed Antarctic route decision-support prototype with mission-aware alternatives."
     ),
@@ -77,7 +84,10 @@ BASE = Path(__file__).resolve().parent
 SYNTHETIC = BASE / "data" / "sample" / "synthetic_dataset.json"
 REAL = BASE / "data" / "real" / "navigator_bundle.json"
 
-USE_REAL = os.getenv("USE_REAL_DATA", "0").strip() == "1"
+# Real source-derived data is the production default. Synthetic data is only
+# available when the operator explicitly opts into it for offline testing.
+USE_REAL = os.getenv("USE_REAL_DATA", "1").strip() == "1"
+ALLOW_SYNTHETIC_FALLBACK = os.getenv("ALLOW_SYNTHETIC_FALLBACK", "0").strip() == "1"
 _dataset: dict[str, Any] | None = None
 
 
@@ -112,7 +122,20 @@ def get_dataset() -> dict[str, Any]:
     if _dataset is not None:
         return _dataset
 
-    path = REAL if USE_REAL and REAL.exists() else SYNTHETIC
+    if USE_REAL:
+        if REAL.exists():
+            path = REAL
+        elif ALLOW_SYNTHETIC_FALLBACK and SYNTHETIC.exists():
+            path = SYNTHETIC
+        else:
+            raise RuntimeError(
+                "Real navigator bundle is required but was not found at "
+                f"{REAL}. Refresh the real data bundle or explicitly set "
+                "ALLOW_SYNTHETIC_FALLBACK=1 for offline testing."
+            )
+    else:
+        path = SYNTHETIC
+
     if not path.exists():
         raise RuntimeError(f"Dataset not found: {path}")
 
@@ -127,13 +150,17 @@ def get_dataset() -> dict[str, Any]:
         raw.get("meta", {})
     )
 
-    if USE_REAL and path != REAL:
-        meta["requested_real_data"] = True
+    real_active = path == REAL
+    meta["requested_real_data"] = bool(USE_REAL)
+    meta["real_data_active"] = bool(real_active)
+    meta["synthetic_fallback_active"] = bool(not real_active)
+
+    if not real_active:
         meta["fallback_reason"] = (
-            "Real bundle not found; synthetic offline dataset is being used."
+            "Explicit offline synthetic mode was requested."
+            if not USE_REAL
+            else "Explicit synthetic fallback was enabled because the real bundle was unavailable."
         )
-    else:
-        meta["requested_real_data"] = USE_REAL
 
     meta.setdefault(
         "source",
@@ -314,48 +341,28 @@ def project_icebergs(
     icebergs: list[dict[str, Any]],
     hours: int,
 ) -> list[dict[str, Any]]:
-    """Project observed icebergs once to the requested horizon."""
+    """Project observed icebergs once with RK4 using the real forcing grids."""
     dataset = get_dataset()
     projected: list[dict[str, Any]] = []
-
-    steps = max(
-        1,
-        math.ceil(hours / 6),
-    )
-
     for iceberg in icebergs:
-        lat = float(iceberg["lat"])
-        lon = float(iceberg["lon"])
-
-        for _ in range(steps):
-            row, col = latlon_to_rc(
-                lat,
-                lon,
+        try:
+            projected.append(
+                project_iceberg_rk4(
+                    iceberg,
+                    hours,
+                    dataset["current_u"],
+                    dataset["current_v"],
+                    dataset["wind_u"],
+                    dataset["wind_v"],
+                    dataset["lat_grid"],
+                    dataset["lon_grid"],
+                    ensemble_size=5,
+                )
             )
-
-            lat, lon = advect_iceberg(
-                lat,
-                lon,
-                (
-                    dataset["current_u"][row, col],
-                    dataset["current_v"][row, col],
-                ),
-                (
-                    dataset["wind_u"][row, col],
-                    dataset["wind_v"][row, col],
-                ),
-                6,
-            )
-
-        projected.append(
-            {
-                **iceberg,
-                "projected_lat": lat,
-                "projected_lon": lon,
-                "hours_ahead": hours,
-            }
-        )
-
+        except Exception:
+            # Keep the real-data route operational even if one malformed iceberg
+            # record cannot be projected.
+            continue
     return projected
 
 
@@ -438,6 +445,18 @@ def iceberg_risk_grid(
                     risk[rr, cc],
                     value,
                 )
+
+        # Expand the screening field to the RK4 uncertainty ensemble so a route
+        # does not treat the central trajectory as perfectly certain.
+        for member in iceberg.get("ensemble", []):
+            mlat = float(member.get("lat", lat))
+            mlon = float(member.get("lon", lon))
+            if GRID_LAT_MIN <= mlat <= GRID_LAT_MAX and GRID_LON_MIN <= mlon <= GRID_LON_MAX:
+                mr, mc = latlon_to_rc(mlat, mlon)
+                for rr in range(max(0, mr - 1), min(rows, mr + 2)):
+                    for cc in range(max(0, mc - 1), min(cols, mc + 2)):
+                        value = 0.65 * math.exp(-math.hypot(rr - mr, cc - mc) ** 2 / 2.0)
+                        risk[rr, cc] = max(risk[rr, cc], value)
 
     # Land is never routable even if an iceberg risk calculation produces zero.
     risk[~dataset["navigable_mask"]] = 1.0
@@ -771,6 +790,8 @@ def _data_status_from_meta(meta: dict[str, Any]) -> dict[str, Any]:
     return {
         "bundle_generated_at_utc": str(meta.get("bundle_generated_at_utc") or meta.get("data_accessed_utc", "")),
         "dataset_kind": meta.get("dataset_kind", "unknown"),
+        "real_data_active": bool(meta.get("real_data_active", real_bundle)),
+        "synthetic_fallback_active": bool(meta.get("synthetic_fallback_active", not real_bundle)),
         "routing_status": (
             "All available real environmental inputs loaded"
             if forcing and "none" not in forcing.lower()
@@ -795,6 +816,8 @@ def health() -> dict[str, Any]:
         "status": "ok",
         "time": datetime.now(timezone.utc).isoformat(),
         "dataset_kind": meta.get("dataset_kind", "unknown"),
+        "real_data_active": bool(meta.get("real_data_active", False)),
+        "synthetic_fallback_active": bool(meta.get("synthetic_fallback_active", False)),
         "source": meta.get("source", "unknown"),
         "source_date": meta.get("observation_date", ""),
         "iceberg_source": meta.get("iceberg_source", ""),
@@ -814,7 +837,16 @@ def data_status() -> dict[str, Any]:
 def config() -> dict[str, Any]:
     return {
         "stations": _station_config(),
-        "vessel_profiles": list(VESSEL_PROFILES),
+        "vessel_profiles": {
+            key: {
+                "label": value.get("label", key),
+                "ice_class": value.get("ice_class", "screening"),
+                "power_mw": value.get("power_mw"),
+                "design_speed_kn": value.get("design_speed_kn"),
+            }
+            for key, value in VESSEL_PROFILES.items()
+        },
+        "advanced_vessels": ADVANCED_VESSELS,
         "route_objectives": {key: value["label"] for key, value in ROUTE_OBJECTIVES.items()},
         "mission_profiles": {
             key: {"label": value["label"], "description": value["description"]}
@@ -893,6 +925,44 @@ def icebergs_projected(
         "meta": dataset["meta"],
         "trajectory_basis": dataset["meta"].get("trajectory_basis", "unknown"),
     }
+
+
+def _closest_projected_iceberg_to_path(
+    path: list[dict[str, float]],
+    projected_icebergs: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Return the closest projected iceberg to a route, using great-circle distance."""
+    if not path or not projected_icebergs:
+        return None
+
+    def haversine_km(a_lat: float, a_lon: float, b_lat: float, b_lon: float) -> float:
+        radius_km = 6371.0088
+        p1 = math.radians(a_lat)
+        p2 = math.radians(b_lat)
+        dp = math.radians(b_lat - a_lat)
+        dl = math.radians(b_lon - a_lon)
+        q = (
+            math.sin(dp / 2.0) ** 2
+            + math.cos(p1) * math.cos(p2) * math.sin(dl / 2.0) ** 2
+        )
+        return radius_km * 2.0 * math.asin(min(1.0, math.sqrt(q)))
+
+    best: dict[str, Any] | None = None
+    for iceberg in projected_icebergs:
+        ilat = float(iceberg.get("projected_lat", iceberg.get("lat", 0.0)))
+        ilon = float(iceberg.get("projected_lon", iceberg.get("lon", 0.0)))
+        nearest = min(
+            haversine_km(ilat, ilon, float(point["lat"]), float(point["lon"]))
+            for point in path
+        )
+        if best is None or nearest < best["distance_km"]:
+            best = {
+                "name": str(iceberg.get("name", "Tracked iceberg")),
+                "distance_km": round(float(nearest), 1),
+                "projected_lat": round(ilat, 4),
+                "projected_lon": round(ilon, 4),
+            }
+    return best
 
 
 @app.get("/api/route")
@@ -1009,6 +1079,19 @@ def route(
         candidate["objective_description"] = ROUTE_OBJECTIVES[objective]["description"]
         candidate["requested_start"] = {"lat": start_lat, "lon": start_lon}
         candidate["requested_goal"] = {"lat": goal_lat, "lon": goal_lon}
+        candidate["polar_screening"] = polar_safety_screen(
+            vessel_profile,
+            candidate["max_ice_concentration"],
+        )
+        candidate["closest_projected_iceberg"] = _closest_projected_iceberg_to_path(
+            candidate["path"],
+            projected,
+        )
+        candidate["polar_geometry"] = [
+            [round(x, 1), round(y, 1)]
+            for point in candidate["path"]
+            for x, y in [polar_stereographic_xy(point["lat"], point["lon"])]
+        ]
         candidate["_path_rc"] = path_rc
         candidates.append(candidate)
 
@@ -1071,6 +1154,16 @@ def route(
         "start_snapped_to_ocean": recommended["start_snapped_to_ocean"],
         "goal_snapped_to_ocean": recommended["goal_snapped_to_ocean"],
         "trajectory_basis": recommended["trajectory_basis"],
+        "geometry": {
+            "projection": "EPSG:3031",
+            "start_xy_m": [round(v, 1) for v in polar_stereographic_xy(start_lat, start_lon)],
+            "goal_xy_m": [round(v, 1) for v in polar_stereographic_xy(goal_lat, goal_lon)],
+        },
+        "intelligence": {
+            "iceberg_trajectory": "RK4 free-drift + uncertainty ensemble",
+            "ship_performance": "Lindqvist-inspired ice resistance planning model",
+            "safety_layer": "POLARIS-inspired screening only; not regulatory certification",
+        },
         "mission": mission,
         "mission_label": MISSION_PROFILES[mission]["label"],
         "priority": priority,
@@ -1085,6 +1178,8 @@ def route(
             "reason": recommended["recommendation_reason"],
         },
         "alternatives": candidates,
+        "real_data_active": bool(dataset["meta"].get("real_data_active", False)),
+        "synthetic_fallback_active": bool(dataset["meta"].get("synthetic_fallback_active", False)),
         "data_used": {
             "sea_ice": {
                 "source": dataset["meta"].get("source", ""),
@@ -1109,6 +1204,87 @@ def route(
             or recommended["route_assessment"].startswith("High")
         ),
         "candidate_warnings": route_errors,
+    }
+
+
+@app.get("/api/polar-screen")
+def polar_screen(
+    vessel_profile: str = Query("ice_capable"),
+    ice_concentration: float = Query(0.50, ge=0.0, le=1.0),
+) -> dict[str, Any]:
+    """Return transparent screening-level polar safety information."""
+    if vessel_profile not in VESSEL_PROFILES:
+        raise HTTPException(status_code=400, detail="Unknown vessel_profile.")
+    result = polar_safety_screen(vessel_profile, ice_concentration)
+    result["notice"] = (
+        "Screening only: full IMO POLARIS requires ice type/thickness, certified vessel "
+        "class data and regulatory review; this endpoint does not certify a route."
+    )
+    return result
+
+
+@app.get("/api/geometry")
+def geometry(lat: float, lon: float) -> dict[str, float]:
+    _validate_latlon(lat, lon)
+    x, y = polar_stereographic_xy(lat, lon)
+    return {"lat": lat, "lon": lon, "epsg": 3031, "x_m": round(x, 2), "y_m": round(y, 2)}
+
+
+def _grid_value_at(dataset: dict[str, Any], field: str, lat: float, lon: float) -> float:
+    row, col = latlon_to_rc(lat, lon)
+    return float(dataset[field][row, col])
+
+
+@app.get("/api/voyage-simulation")
+def voyage_simulation(
+    start_lat: float,
+    start_lon: float,
+    goal_lat: float,
+    goal_lon: float,
+    horizon_days: int = Query(3, ge=1, le=7),
+    vessel_profile: str = Query("ice_capable"),
+    mission: str = Query("resupply"),
+    priority: str = Query("balanced"),
+    max_ice_exposure: str = Query("medium"),
+    freshness_requirement_hours: int = Query(48, ge=0, le=168),
+) -> dict[str, Any]:
+    """Compute a route first, then run an hourly-ish vessel performance simulation."""
+    result = route(
+        start_lat=start_lat, start_lon=start_lon, goal_lat=goal_lat, goal_lon=goal_lon,
+        horizon_days=horizon_days, vessel_profile=vessel_profile, mission=mission,
+        priority=priority, max_ice_exposure=max_ice_exposure,
+        freshness_requirement_hours=freshness_requirement_hours,
+    )
+    dataset = get_dataset()
+    selected = result["alternatives"][next(
+        i for i, item in enumerate(result["alternatives"])
+        if item["id"] == result["recommendation"]["route_id"]
+    )]
+    path = selected["path"]
+    # Risk grid at the selected forecast horizon; iceberg projection is performed once.
+    forecast = forecast_concentration(dataset["concentration"], int(dataset["meta"].get("day_of_year", 1)), dataset["lat_grid"], horizon_days)
+    projected = project_icebergs(dataset["icebergs"], horizon_days * 24)
+    risk = iceberg_risk_grid(projected, forecast[horizon_days - 1].shape)
+    concentration = forecast[horizon_days - 1]
+
+    def concentration_at(lat: float, lon: float) -> float:
+        row, col = latlon_to_rc(lat, lon)
+        return float(concentration[row, col])
+
+    def risk_at(lat: float, lon: float) -> float:
+        row, col = latlon_to_rc(lat, lon)
+        return float(risk[row, col])
+
+    simulation = simulate_voyage(path, vessel_profile, concentration_at, risk_at)
+    return {
+        "route_id": result["recommendation"]["route_id"],
+        "route_label": result["recommendation"]["label"],
+        "vessel_profile": vessel_profile,
+        "vessel": ADVANCED_VESSELS.get(vessel_profile, ADVANCED_VESSELS["standard"]),
+        "simulation": simulation,
+        "screening": polar_safety_screen(vessel_profile, selected["max_ice_concentration"]),
+        "human_review_required": True,
+        "notice": "Planning simulation only; fuel and ETA are model estimates, not measured operational performance.",
     }
 
 

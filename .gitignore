@@ -1,0 +1,20 @@
+.env
+.env.*
+!.env.example
+venv/
+.venv/
+node_modules/
+__pycache__/
+*.py[cod]
+*.part
+backend/data/real/raw/
+backend/data/real/historical/
+
+# Local machine credential/config files
+.dodsrc
+
+# Frontend build output
+frontend/dist/
+
+# Local test/cache directories
+.pytest_cache/

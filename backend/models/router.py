@@ -10,16 +10,34 @@ import numpy as np
 
 VESSEL_PROFILES = {
     "standard": {
-        "ice_penalty": 11.0,
-        "ice_exponent": 2.0,
-        "blocked_threshold": 1.0,
-        "iceberg_weight": 18.0,
+        "label": "Standard vessel", "ice_class": "PC7", "power_mw": 8.0,
+        "design_speed_kn": 13.0, "ice_penalty": 11.0, "ice_exponent": 2.0,
+        "blocked_threshold": 1.0, "iceberg_weight": 18.0,
     },
     "ice_capable": {
-        "ice_penalty": 6.0,
-        "ice_exponent": 1.7,
-        "blocked_threshold": 1.0,
-        "iceberg_weight": 12.0,
+        "label": "Ice-capable vessel", "ice_class": "PC5", "power_mw": 13.5,
+        "design_speed_kn": 14.0, "ice_penalty": 6.0, "ice_exponent": 1.7,
+        "blocked_threshold": 1.0, "iceberg_weight": 12.0,
+    },
+    "sagar_nidhi": {
+        "label": "ORV Sagar Nidhi", "ice_class": "PC7", "power_mw": 5.6,
+        "design_speed_kn": 13.0, "ice_penalty": 10.0, "ice_exponent": 1.9,
+        "blocked_threshold": 0.85, "iceberg_weight": 16.0,
+    },
+    "vasiliy_golovnin": {
+        "label": "MV Vasiliy Golovnin", "ice_class": "PC5", "power_mw": 13.5,
+        "design_speed_kn": 14.0, "ice_penalty": 6.0, "ice_exponent": 1.7,
+        "blocked_threshold": 0.95, "iceberg_weight": 12.0,
+    },
+    "arc7": {
+        "label": "Generic Arc7 resupply vessel", "ice_class": "Arc7", "power_mw": 13.0,
+        "design_speed_kn": 14.0, "ice_penalty": 5.0, "ice_exponent": 1.6,
+        "blocked_threshold": 0.98, "iceberg_weight": 10.0,
+    },
+    "planned_pc4": {
+        "label": "Planned Indian polar vessel (notional)", "ice_class": "PC4", "power_mw": 12.0,
+        "design_speed_kn": 14.0, "ice_penalty": 4.5, "ice_exponent": 1.5,
+        "blocked_threshold": 0.99, "iceberg_weight": 9.0,
     },
 }
 

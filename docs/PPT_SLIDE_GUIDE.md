@@ -1,83 +1,70 @@
 # SIH PPT slide guide — Antarctic Navigator (SIH26059)
 
-Verify the exact current template on your team's SIH portal before
-finalizing — slide counts and section names have varied by edition, and
-neither this guide nor any other AI-generated one is a substitute for
-checking the actual document your screening committee will use. Multiple
-independent sources point to a 6-slide idea-submission structure as the
-common default; use that as your starting point.
+Verify the exact current SIH template on your team's portal before submission. This guide is content guidance, not a replacement for the official template.
 
 ## Slide 1 — Title
-PS ID (SIH26059), exact PS title, theme (copy exact wording from the
-portal), category (Software), team ID/name exactly as registered. No
-college name or logo if your screening round requires anonymity. Visual:
-a clean map of the Southern Ocean/Antarctica with Maitri and Bharati
-marked — not a decorative AI-generated ice landscape.
 
-## Slide 2 — Idea / Proposed Solution
-One-line pitch: a decision-support system that fuses sea-ice forecasts,
-iceberg drift, and vessel constraints to recommend lower-risk Antarctic
-logistics routes. Show the problem in three short boxes (dynamic ice,
-moving iceberg hazards, complex operator trade-offs), then a flowchart:
-data → forecast + drift → combined risk field → route optimizer → route
-options → operator decision. State your actual differentiator explicitly:
-India-specific, explainable, offline-capable — not "first of its kind."
+Show: PS ID SIH26059, exact official PS title, theme as written in the portal, Software category, team ID/name. Follow the anonymity rule required by your round.
+
+Visual: a clean Antarctic/Southern Ocean map with Maitri and Bharati marked. Avoid decorative AI-generated Antarctic art.
+
+## Slide 2 — Proposed Solution
+
+One-line pitch: an explainable decision-support workflow that combines changing sea ice, iceberg observations/trajectories and vessel constraints to recommend mission-aware logistics route options.
+
+Main visual:
+
+`Data → Forecast + Drift → Combined Risk Field → A* Route Alternatives → Mission-Aware Recommendation → Operator Decision`
+
+Prototype decision view:
+
+`Route A — Safest | Route B — Fastest | Route C — Balanced → Recommended Route + Why selected?`
+
+USP: **India-focused + explainable + multi-source + human-in-the-loop Antarctic logistics decision support**.
+
+Do not claim that polar route optimisation itself has never been built; related systems such as BAS PolarRoute exist.
 
 ## Slide 3 — Technical Approach
-Data sources (NSIDC sea-ice CDR, and — once you build them — ERA5 wind,
-OSCAR currents, BYU iceberg tracks, NCPOR station context) feeding a
-processing pipeline (ingestion → forecast + drift model → combined risk
-field → vessel-specific A* routing → FastAPI → Leaflet map). Group tech
-stack by function, not a flat language list — data / modelling /
-optimisation / backend / visualisation. State plainly that the current
-prototype uses an explainable statistical forecast baseline and a
-simplified drift model, not a trained ML system — and that a production
-version would validate against historical data with proper uncertainty
-estimates. Honesty here reads as competence, not weakness.
 
-## Slide 4 — Feasibility & Viability (business model goes here)
-**Technical feasibility:** public data, no proprietary barrier; offline
-demo capability as a deliberate reliability choice, not a limitation.
-**Risk → mitigation table:** data latency → cached fallback; forecast
-uncertainty → confidence framing, not false precision; iceberg position
-error → risk zone rather than a point; venue network failure → offline
-synthetic dataset always available.
-**Revenue model — B2G primary** (NCPOR / Indian Antarctic Programme /
-Ministry of Earth Sciences, as an operational planning tool), **B2B
-secondary** (polar logistics/expedition operators; insurers only once you
-have an actual validated risk-reduction case study, not before). Revenue
-streams: licensing, data/API subscription, deployment & support — don't
-invent specific rupee figures without market validation to back them.
-**Scalability:** state the real architectural property you have —
-stateless API layer, sea-ice/scientific data separated from route/session
-data — rather than a specific user-count claim you haven't benchmarked.
+Visual data flow:
+
+`NSIDC sea ice + USNIC iceberg observations + OSCAR NRT currents + ERA5 wind → data normalisation → sea-ice forecast + physics-informed iceberg drift → risk field → A* Route A/B/C → mission-aware recommendation → FastAPI → Leaflet`
+
+Show the real-data freshness/provenance panel. The current prototype's sea-ice forecast is a transparent baseline and the iceberg model is a simplified physics-informed free-drift approximation; do not present either as a trained deep-learning model.
+
+## Slide 4 — Feasibility & Viability
+
+Three blocks:
+
+1. Technical feasibility — public scientific data, modular pipeline, offline fallback.
+2. Risk → mitigation — latency → cached data; uncertainty → confidence framing; network failure → offline fallback; observation error → spatial risk zone.
+3. Business model — B2G primary (research/Antarctic logistics operations), B2B secondary (polar logistics/analytics). Revenue streams: annual licence, integration/API access, deployment/support.
+
+Scalability visual: CDN → stateless API → cache → async workers → scientific object storage → PostGIS/PostgreSQL.
 
 ## Slide 5 — Impact & Benefits
-Before/after visual: static fragmented ice information + manual
-interpretation → dynamic risk map + route options + operator decision.
-Benefit categories: safety (earlier hazard visibility), efficiency (avoid
-unnecessary high-ice exposure), adaptability (recompute as forecasts
-update), India-specific value (built around actual Indian Antarctic
-station logistics), reusability (architecture generalizes to other polar
-environmental decision support). Don't cite specific percentage
-improvements (fuel saved, time saved) unless you've actually measured
-them against historical routes — say "target: quantify against historical
-backtesting" instead.
+
+Use a before/after diagram rather than paragraphs:
+
+`Fragmented information → manual interpretation → route choice`
+
+versus
+
+`Current environmental data → risk map → route options → operator decision`
+
+Do not invent fuel/time percentages without backtesting.
 
 ## Slide 6 — Research & References
-NSIDC (sea-ice CDR, G02202/G10016), Bigg et al. (1997) for iceberg
-dynamics, and — importantly — acknowledge PolarRoute (British Antarctic
-Survey, open source) and IcySea (commercial, Drift+Noise/Norwegian
-Meteorological Institute) as related prior work you're aware of and
-positioning against, not competing to hide from a judge who already
-knows about them. If asked "isn't this already done?", answer directly:
-"Yes, polar route planning exists — our contribution is an India-specific,
-explainable, offline-capable workflow for Antarctic research logistics,
-not a claim that route optimization itself is new."
 
-## General formatting
-Diagrams and maps over paragraphs — aim for the content to communicate in
-under a minute of scanning. Keep bullets short. Use your own generated
-route/risk output as a screenshot rather than a mockup wherever possible —
-a real screenshot of your own working system is stronger evidence than
-any illustration.
+Include NSIDC G10016 V4, NSIDC G02202 V6, USNIC Antarctic Icebergs, BYU/NIC v8.0, the iceberg-dynamics literature used as background, and related polar route-planning work. Include the GitHub QR code to the working repository.
+
+## Data claims
+
+When using the real-data prototype, use precise language:
+
+- G10016 V4 = near-real-time sea-ice concentration input.
+- USNIC = current weekly Antarctic iceberg observations.
+- BYU/NIC v8.0 = historical iceberg tracks for validation/backtesting.
+- Wind/current forcing remains explicitly identified in the UI until a validated real forcing adapter is connected.
+
+Do not write "operational navigation" or "100% safe route".

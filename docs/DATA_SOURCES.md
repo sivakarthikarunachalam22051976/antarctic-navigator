@@ -1,65 +1,49 @@
-# Real-world data sources
+# Real-world data sources and how the app uses them
 
-This build ships with a synthetic dataset so it runs standalone. Here's
-where the real thing comes from, what's actually wired up already, and
-what still needs work — verified, not guessed.
+## Sea ice — current
 
-## 1. Sea-ice concentration — wired up
+**NOAA/NSIDC G10016 Version 4** is the project's current near-real-time Antarctic sea-ice concentration input. The project downloads the latest Antarctic daily file from the official NOAA@NSIDC HTTPS archive and regrids the South Polar EPSG:3412 field to the application's operating grid.
 
-- **Source:** NOAA/NSIDC Climate Data Record of Passive Microwave Sea Ice
-  Concentration. Two products:
-  - **G02202** — the final, quality-controlled CDR (updated every few
-    months, best for a backtested/historical demo).
-  - **G10016** — the Near-Real-Time companion (fills the gap until the
-    next G02202 release; use this if you want the most current data).
-- **Access:** create a free account at https://urs.earthdata.nasa.gov/,
-  then run:
-  ```bash
-  export NSIDC_SHORT_NAME=G10016   # or G02202
-  python backend/data/fetch_real_data.py
-  python backend/data/convert_nsidc_bundle.py
-  ```
-  `fetch_real_data.py` uses `earthaccess` (NASA's official client) to
-  search and download; `convert_nsidc_bundle.py` reprojects the NetCDF
-  grid (EPSG:3412, NSIDC South Polar Stereographic) onto this app's
-  lat/lon grid using `pyproj` + `scipy.interpolate`.
-- **What you get:** real sea-ice concentration only. The converter's
-  output metadata explicitly says `dataset_kind: real_seaice_only` and
-  zeros out wind/current/iceberg fields rather than silently reusing
-  synthetic values as if they were real — check that field before you
-  claim "real data" anywhere in your pitch.
+Official: https://nsidc.org/data/g10016/versions/4
 
-## 2. Iceberg positions/tracks — not yet wired up
+## Sea ice — historical validation
 
-- **Source:** the Antarctic iceberg tracking database maintained by
-  Brigham Young University's Center for Remote Sensing (large icebergs
-  tracked via scatterometer). Search "BYU Antarctic iceberg tracking
-  database" for the current download page — it has moved before, so
-  don't hardcode the URL into a slide as permanent.
-- **Access:** typically a direct CSV/text download, no login required, no
-  stable REST API as of this writing.
-- **Status:** there's no adapter for this yet in the codebase. If you
-  build one, save the export to `backend/data/real/iceberg_tracks_real.csv`
-  and write a loader that feeds into the same `icebergs` list shape used
-  by the synthetic generator (`id`, `lat`, `lon`, `length_km`).
+**NOAA/NSIDC G02202 Version 6** is the final CDR and is reserved for historical evaluation/backtesting rather than the current daily feed.
 
-## 3. Wind and ocean currents — not yet wired up
+Official: https://nsidc.org/data/g02202/versions/6
 
-- **Wind:** ECMWF ERA5 reanalysis via the Copernicus Climate Data Store
-  (`cdsapi`, already in requirements.txt) — needs a free CDS API key from
-  https://cds.climate.copernicus.eu/.
-- **Ocean currents:** NOAA OSCAR surface currents, or a regional ocean
-  model output — worth asking your mentor directly whether NCPOR or the
-  Indian Antarctic Programme can share something for the hackathon.
-- **Status:** same as icebergs — no adapter built yet. Until one exists,
-  the drift model and iceberg-risk routing run on the synthetic wind/
-  current fields even when sea-ice is real. Be explicit about this in
-  your technical slide rather than letting it sound like everything is real.
+## Icebergs — current
 
-## Practical advice for the demo itself
+**U.S. National Ice Center (USNIC) Antarctic Iceberg product** is the primary current iceberg source. The current product is updated weekly and provides CSV/GIS data with iceberg identifiers, dimensions, positions, region and update information.
 
-Don't depend on live calls to any of the above during your actual judging
-slot. Download and cache real data ahead of time, exactly the way this
-repo ships a pre-generated synthetic file as the offline fallback. Keep
-that fallback wired in (`USE_REAL_DATA=0` is the default) even after you
-add real data, so a bad venue connection can't take down your demo.
+Official: https://usicecenter.gov/Products/Antarcicebergs
+
+`fetch_usnic_icebergs.py` discovers the current CSV link from the official page. `integrate_usnic_icebergs.py` normalizes common CSV field layouts into the Navigator schema and records the source update date.
+
+## Icebergs — historical validation
+
+**BYU/NIC consolidated Antarctic iceberg database v8.0** is used for historical tracks and validation/backtesting. The current listed consolidated release covers 1978 through April 22, 2025, so it is intentionally not treated as a current 2026 feed.
+
+Official: https://www.scp.byu.edu/iceberg/database1.html
+
+## Ocean currents — current/near-real-time optional layer
+
+**NASA/JPL PO.DAAC OSCAR_L4_OC_NRT_V2.0** provides daily global 0.25-degree surface currents, with approximately two-day latency according to the PO.DAAC catalog. The current adapter uses Earthdata authentication, downloads recent granules, reads total surface-current `u`/`v`, and regrids them to the Navigator grid.
+
+Official: https://podaac.jpl.nasa.gov/dataset/OSCAR_L4_OC_NRT_V2.0
+
+## Wind — reanalysis optional layer
+
+**Copernicus/ECMWF ERA5** is available through the CDS API. The project can download a recent Antarctic subset containing 10-m `u10/v10` wind components. ERA5 is a reanalysis, so its availability is delayed relative to a live forecast; it is appropriate for recent/historical environmental forcing and model development.
+
+Official API setup: https://cds.climate.copernicus.eu/how-to-api
+
+## What the real bundle means
+
+The bundle is explicit about which layers are present:
+
+- `real_seaice_only` — real NSIDC sea ice, no current USNIC iceberg file available.
+- `real_seaice_usnic_icebergs` — real NSIDC sea ice + current USNIC iceberg observations.
+- Environmental metadata identifies whether OSCAR currents and/or ERA5 winds are actually present.
+
+The application must not claim operational navigation accuracy simply because a real dataset is present. Forecast skill, iceberg-trajectory accuracy, fuel modeling and route safety still require scientific validation and historical backtesting.

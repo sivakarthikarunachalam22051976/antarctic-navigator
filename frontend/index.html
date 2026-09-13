@@ -58,10 +58,52 @@
           <select id="vessel-profile">
             <option value="standard">Standard vessel</option>
             <option value="ice_capable">Ice-capable vessel</option>
+            <option value="sagar_nidhi">ORV Sagar Nidhi</option>
+            <option value="vasiliy_golovnin">MV Vasiliy Golovnin</option>
+            <option value="arc7">Generic Arc7 resupply vessel</option>
+            <option value="planned_pc4">Planned Indian polar vessel (notional)</option>
           </select>
 
           <p class="hint">
             Changes route tolerance to concentrated ice and moving iceberg risk.
+          </p>
+        </section>
+
+        <section class="panel-section mission-panel">
+          <h2>Mission-aware routing</h2>
+
+          <label class="field-label" for="mission-profile">Mission</label>
+          <select id="mission-profile">
+            <option value="resupply">Resupply / station logistics</option>
+            <option value="research_transit">Research transit</option>
+            <option value="time_critical">Time-critical transfer</option>
+          </select>
+
+          <label class="field-label" for="route-priority">Priority</label>
+          <select id="route-priority">
+            <option value="safety_first">Safety first</option>
+            <option value="balanced" selected>Balanced</option>
+            <option value="time_sensitive">Time sensitive</option>
+          </select>
+
+          <label class="field-label" for="max-ice-exposure">Maximum acceptable ice exposure</label>
+          <select id="max-ice-exposure">
+            <option value="low">Low</option>
+            <option value="medium" selected>Medium</option>
+            <option value="high">High</option>
+          </select>
+
+          <label class="field-label" for="freshness-requirement">Data freshness requirement</label>
+          <select id="freshness-requirement">
+            <option value="24">&lt; 24h</option>
+            <option value="48" selected>&lt; 48h</option>
+            <option value="72">&lt; 72h</option>
+            <option value="168">&lt; 168h</option>
+          </select>
+
+          <div class="intelligence-note">Predictive + physics-informed decision intelligence · human in the loop</div>
+          <p class="hint">
+            The engine scores route alternatives against the mission, vessel and selected constraints.
           </p>
         </section>
 
@@ -113,6 +155,18 @@
           </div>
 
           <div id="route-result" class="route-result"></div>
+          <div id="voyage-result" class="voyage-result"></div>
+        </section>
+
+        <section class="panel-section advanced-panel">
+          <h2>Polar intelligence</h2>
+          <div class="intelligence-grid">
+            <div><span>Drift</span><strong>RK4 + ensemble</strong></div>
+            <div><span>Geometry</span><strong>EPSG:3031</strong></div>
+            <div><span>Ship model</span><strong>Ice resistance</strong></div>
+            <div><span>Safety</span><strong>Polar safety screening</strong></div>
+          </div>
+          <p class="hint">Physics-informed estimates are transparent and intended for decision support; regulatory certification is outside this MVP.</p>
         </section>
 
         <section class="panel-section">
@@ -155,6 +209,13 @@
           <span id="forecast-label">Forecast day +3</span>
           <span>·</span>
           <span id="dataset-label">Loading dataset…</span>
+        </div>
+
+        <div class="route-key" aria-label="Route alternatives legend">
+          <span><i class="key-line safest"></i> A Safest</span>
+          <span><i class="key-line fastest"></i> B Fastest</span>
+          <span><i class="key-line balanced"></i> C Balanced</span>
+          <span class="key-note">Recommended route is highlighted</span>
         </div>
       </main>
     </div>
