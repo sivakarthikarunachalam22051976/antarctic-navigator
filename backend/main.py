@@ -84,7 +84,7 @@ BASE = Path(__file__).resolve().parent
 SYNTHETIC = BASE / "data" / "sample" / "synthetic_dataset.json"
 REAL = BASE / "data" / "real" / "navigator_bundle.json"
 
-USE_REAL = os.getenv("USE_REAL_DATA", "0").strip() == "1"
+USE_REAL = os.getenv("USE_REAL_DATA", "1").strip() == "1"
 ALLOW_SYNTHETIC_FALLBACK = os.getenv("ALLOW_SYNTHETIC_FALLBACK", "0").strip() == "1"
 _dataset: dict[str, Any] | None = None
 
