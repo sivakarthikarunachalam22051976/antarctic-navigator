@@ -84,9 +84,7 @@ BASE = Path(__file__).resolve().parent
 SYNTHETIC = BASE / "data" / "sample" / "synthetic_dataset.json"
 REAL = BASE / "data" / "real" / "navigator_bundle.json"
 
-# Real source-derived data is the production default. Synthetic data is only
-# available when the operator explicitly opts into it for offline testing.
-USE_REAL = os.getenv("USE_REAL_DATA", "1").strip() == "1"
+USE_REAL = os.getenv("USE_REAL_DATA", "0").strip() == "1"
 ALLOW_SYNTHETIC_FALLBACK = os.getenv("ALLOW_SYNTHETIC_FALLBACK", "0").strip() == "1"
 _dataset: dict[str, Any] | None = None
 
@@ -129,9 +127,9 @@ def get_dataset() -> dict[str, Any]:
             path = SYNTHETIC
         else:
             raise RuntimeError(
-                "Real navigator bundle is required but was not found at "
-                f"{REAL}. Refresh the real data bundle or explicitly set "
-                "ALLOW_SYNTHETIC_FALLBACK=1 for offline testing."
+                "Real-data mode is enabled, but the real navigator bundle is missing. "
+                "Refresh backend/data/real/navigator_bundle.json or explicitly set "
+                "ALLOW_SYNTHETIC_FALLBACK=1 for offline testing only."
             )
     else:
         path = SYNTHETIC
@@ -150,16 +148,12 @@ def get_dataset() -> dict[str, Any]:
         raw.get("meta", {})
     )
 
-    real_active = path == REAL
-    meta["requested_real_data"] = bool(USE_REAL)
-    meta["real_data_active"] = bool(real_active)
-    meta["synthetic_fallback_active"] = bool(not real_active)
-
-    if not real_active:
+    meta["requested_real_data"] = USE_REAL
+    meta["real_data_active"] = bool(USE_REAL and path == REAL)
+    meta["synthetic_fallback_active"] = bool(USE_REAL and path != REAL)
+    if USE_REAL and path != REAL:
         meta["fallback_reason"] = (
-            "Explicit offline synthetic mode was requested."
-            if not USE_REAL
-            else "Explicit synthetic fallback was enabled because the real bundle was unavailable."
+            "Synthetic offline fallback explicitly enabled for testing."
         )
 
     meta.setdefault(
@@ -790,8 +784,6 @@ def _data_status_from_meta(meta: dict[str, Any]) -> dict[str, Any]:
     return {
         "bundle_generated_at_utc": str(meta.get("bundle_generated_at_utc") or meta.get("data_accessed_utc", "")),
         "dataset_kind": meta.get("dataset_kind", "unknown"),
-        "real_data_active": bool(meta.get("real_data_active", real_bundle)),
-        "synthetic_fallback_active": bool(meta.get("synthetic_fallback_active", not real_bundle)),
         "routing_status": (
             "All available real environmental inputs loaded"
             if forcing and "none" not in forcing.lower()
@@ -816,8 +808,6 @@ def health() -> dict[str, Any]:
         "status": "ok",
         "time": datetime.now(timezone.utc).isoformat(),
         "dataset_kind": meta.get("dataset_kind", "unknown"),
-        "real_data_active": bool(meta.get("real_data_active", False)),
-        "synthetic_fallback_active": bool(meta.get("synthetic_fallback_active", False)),
         "source": meta.get("source", "unknown"),
         "source_date": meta.get("observation_date", ""),
         "iceberg_source": meta.get("iceberg_source", ""),
@@ -925,44 +915,6 @@ def icebergs_projected(
         "meta": dataset["meta"],
         "trajectory_basis": dataset["meta"].get("trajectory_basis", "unknown"),
     }
-
-
-def _closest_projected_iceberg_to_path(
-    path: list[dict[str, float]],
-    projected_icebergs: list[dict[str, Any]],
-) -> dict[str, Any] | None:
-    """Return the closest projected iceberg to a route, using great-circle distance."""
-    if not path or not projected_icebergs:
-        return None
-
-    def haversine_km(a_lat: float, a_lon: float, b_lat: float, b_lon: float) -> float:
-        radius_km = 6371.0088
-        p1 = math.radians(a_lat)
-        p2 = math.radians(b_lat)
-        dp = math.radians(b_lat - a_lat)
-        dl = math.radians(b_lon - a_lon)
-        q = (
-            math.sin(dp / 2.0) ** 2
-            + math.cos(p1) * math.cos(p2) * math.sin(dl / 2.0) ** 2
-        )
-        return radius_km * 2.0 * math.asin(min(1.0, math.sqrt(q)))
-
-    best: dict[str, Any] | None = None
-    for iceberg in projected_icebergs:
-        ilat = float(iceberg.get("projected_lat", iceberg.get("lat", 0.0)))
-        ilon = float(iceberg.get("projected_lon", iceberg.get("lon", 0.0)))
-        nearest = min(
-            haversine_km(ilat, ilon, float(point["lat"]), float(point["lon"]))
-            for point in path
-        )
-        if best is None or nearest < best["distance_km"]:
-            best = {
-                "name": str(iceberg.get("name", "Tracked iceberg")),
-                "distance_km": round(float(nearest), 1),
-                "projected_lat": round(ilat, 4),
-                "projected_lon": round(ilon, 4),
-            }
-    return best
 
 
 @app.get("/api/route")
@@ -1079,24 +1031,16 @@ def route(
         candidate["objective_description"] = ROUTE_OBJECTIVES[objective]["description"]
         candidate["requested_start"] = {"lat": start_lat, "lon": start_lon}
         candidate["requested_goal"] = {"lat": goal_lat, "lon": goal_lon}
-        candidate["polar_screening"] = polar_safety_screen(
-            vessel_profile,
-            candidate["max_ice_concentration"],
-        )
-        candidate["closest_projected_iceberg"] = _closest_projected_iceberg_to_path(
-            candidate["path"],
-            projected,
-        )
-        candidate["polar_geometry"] = [
-            [round(x, 1), round(y, 1)]
-            for point in candidate["path"]
-            for x, y in [polar_stereographic_xy(point["lat"], point["lon"])]
-        ]
+        candidate["polar_screening"] = polar_safety_screen(vessel_profile, candidate["max_ice_concentration"])
         candidate["_path_rc"] = path_rc
         candidates.append(candidate)
 
     if not candidates:
-        detail = "No candidate route exists through the current forecast risk field."
+        detail = (
+            "No candidate route exists through the current forecast risk field. "
+            "The planner preserves 100% sea-ice and non-navigable cells as hard exclusions; "
+            "try a different endpoint or forecast horizon if the current corridor is physically disconnected."
+        )
         if route_errors:
             detail += " " + " | ".join(route_errors)
         raise HTTPException(status_code=422, detail=detail)
@@ -1178,8 +1122,6 @@ def route(
             "reason": recommended["recommendation_reason"],
         },
         "alternatives": candidates,
-        "real_data_active": bool(dataset["meta"].get("real_data_active", False)),
-        "synthetic_fallback_active": bool(dataset["meta"].get("synthetic_fallback_active", False)),
         "data_used": {
             "sea_ice": {
                 "source": dataset["meta"].get("source", ""),

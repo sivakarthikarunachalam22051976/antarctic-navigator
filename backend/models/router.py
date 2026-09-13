@@ -188,10 +188,18 @@ def find_route(
     if not navigable[goal]:
         raise ValueError("Destination point is not on a navigable ocean cell.")
 
-    if concentration[start] >= vessel["blocked_threshold"]:
-        raise ValueError("Start point lies inside an impassable ice cell for this vessel profile.")
-    if concentration[goal] >= vessel["blocked_threshold"]:
-        raise ValueError("Destination lies inside an impassable ice cell for this vessel profile.")
+    # Vessel ice class is a soft performance/risk constraint, not a binary
+    # geographic exclusion. A hard vessel-specific cutoff can disconnect a
+    # real Antarctic station pair simply because the forecast contains
+    # concentrated but potentially traversable ice. We therefore reserve the
+    # hard routing exclusion for 100% concentration; vessel capability is
+    # represented by the ice penalty, vessel-performance model, and polar
+    # safety screening downstream. This keeps the real-data route engine
+    # usable while still surfacing high exposure to the operator.
+    if concentration[start] >= 1.0:
+        raise ValueError("Start point lies inside a fully ice-covered cell.")
+    if concentration[goal] >= 1.0:
+        raise ValueError("Destination lies inside a fully ice-covered cell.")
 
     objective_config = ROUTE_OBJECTIVES.get(
         objective,
@@ -222,7 +230,7 @@ def find_route(
             next_cell = (nr, nc)
             if not navigable[next_cell]:
                 continue
-            if concentration[next_cell] >= profile["blocked_threshold"]:
+            if concentration[next_cell] >= 1.0:
                 continue
 
             new_cost = current_cost + _step_cost(
