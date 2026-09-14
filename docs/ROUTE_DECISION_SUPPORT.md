@@ -46,4 +46,4 @@ The recommended route additionally reports the mission/priority context, source 
 
 ## Technical honesty
 
-This is explainable decision intelligence, not an autonomous navigation system. The current MVP uses a transparent sea-ice forecasting baseline, a simplified physics-informed iceberg drift model, an environmental risk field, and A* optimisation. It does not claim calibrated vessel fuel-consumption savings or certified navigational safety.
+This is explainable decision intelligence, not an autonomous navigation system. The current MVP uses a statistical sea-ice forecasting baseline, a simplified physics-informed iceberg drift model integrated with RK4, an environmental risk field, vessel-aware screening, and A* optimisation. POLARIS is used only as a safety-reference context; the MVP does not implement the full regulatory POLARIS matrix. It does not claim calibrated vessel fuel-consumption savings or certified navigational safety.

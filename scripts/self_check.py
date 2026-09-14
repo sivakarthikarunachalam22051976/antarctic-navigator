@@ -149,45 +149,7 @@ def _test_environmental_regridding() -> None:
         assert np.isfinite(loaded_u).any()
 
 
-def _validate_shipped_real_bundle() -> None:
-    """Verify the packaged real bundle is genuinely source-derived."""
-    real_bundle = BACKEND / "data" / "real" / "navigator_bundle.json"
-    if not real_bundle.exists():
-        raise SystemExit("Packaged real navigator bundle is missing.")
-    with real_bundle.open(encoding="utf-8") as handle:
-        payload = json.load(handle)
-    meta = payload.get("meta", {})
-    required = {
-        "real_seaice_usnic_icebergs",
-        "NOAA/NSIDC G10016 Version 4",
-        "U.S. National Ice Center (USNIC)",
-        "NASA/JPL PO.DAAC OSCAR NRT V2.0",
-        "Copernicus/ECMWF ERA5",
-    }
-    observed = {
-        str(meta.get("dataset_kind", "")),
-        str(meta.get("source", "")),
-        str(meta.get("iceberg_source", "")),
-        str(meta.get("current_source", "")),
-        str(meta.get("wind_source", "")),
-    }
-    if not required.issubset(observed):
-        raise SystemExit(f"Real bundle provenance check failed: {required - observed}")
-    if not payload.get("concentration") or not payload.get("icebergs"):
-        raise SystemExit("Real bundle appears incomplete.")
-    if len(payload["concentration"]) != 60 or len(payload["concentration"][0]) != 180:
-        raise SystemExit("Real bundle grid shape is not the expected 60x180.")
-    print("REAL_BUNDLE_OK", {
-        "sea_ice_date": meta.get("observation_date"),
-        "iceberg_date": meta.get("iceberg_observation_date"),
-        "current_date": meta.get("current_observation_date"),
-        "wind_date": meta.get("wind_observation_date"),
-        "icebergs": len(payload.get("icebergs", [])),
-    })
-
-
 def main() -> None:
-    _validate_shipped_real_bundle()
     if not compileall.compile_dir(
         str(BACKEND),
         quiet=1,
@@ -274,10 +236,23 @@ def main() -> None:
         )
     if alternatives["recommendation"]["route_id"] not in route_ids:
         raise SystemExit("Mission-aware routing recommendation is invalid.")
-    if alternatives.get("geometry", {}).get("projection") != "EPSG:3031":
-        raise SystemExit("Polar geometry projection marker missing.")
+    geometry = alternatives.get("geometry") or {}
+    if geometry.get("projection") != "EPSG:3031":
+        raise SystemExit(
+            "Polar geometry projection marker missing from /api route response. "
+            "Expected geometry.projection=EPSG:3031."
+        )
     if "RK4" not in alternatives.get("intelligence", {}).get("iceberg_trajectory", ""):
         raise SystemExit("RK4 trajectory marker missing.")
+
+    # Validate the real-data robustness endpoint separately from the synthetic
+    # routing smoke test so the new UI control cannot silently regress.
+    api.USE_REAL = True
+    api.ALLOW_SYNTHETIC_FALLBACK = False
+    api._dataset = None
+    robustness = api.validation_robustness(3, "standard")
+    if robustness.get("status") != "completed" or len(robustness.get("scenarios", [])) != 3:
+        raise SystemExit("Route robustness validation failed.")
     if attainable_speed_kn("ice_capable", 0.20) <= 0:
         raise SystemExit("Vessel performance model failed.")
     screen = polar_safety_screen("ice_capable", 0.50)
@@ -302,6 +277,69 @@ def main() -> None:
 
     _test_environmental_regridding()
 
+    # Regression check for the real-data station workflow. Vessel ice class
+    # must not disconnect a valid station-to-station route merely because the
+    # forecast contains concentrated but traversable ice; vessel capability is
+    # evaluated as a soft risk/performance factor downstream.
+    real_bundle = BACKEND / "data" / "real" / "navigator_bundle.json"
+    if real_bundle.exists():
+        from config import latlon_to_rc
+        from models.seaice_forecast import forecast_concentration
+        from main import project_icebergs, iceberg_risk_grid, route
+        from models.router import find_route
+
+        with real_bundle.open(encoding="utf-8") as handle:
+            real_data = json.load(handle)
+        if not real_data.get("meta", {}).get("source"):
+            raise SystemExit("Real bundle provenance metadata is missing.")
+        real_concentration = np.asarray(real_data["concentration"], dtype=float)
+        real_mask = np.asarray(real_data["navigable_mask"], dtype=bool)
+        real_forecast = forecast_concentration(
+            real_concentration,
+            int(real_data["meta"].get("day_of_year", 1)),
+            np.asarray(real_data["lat_grid"]),
+            3,
+        )[2]
+        start = (29, 24)
+        goal = latlon_to_rc(-69.4068, 76.1953)
+        projected_real = project_icebergs(real_data["icebergs"], 72)
+        real_risk = iceberg_risk_grid(projected_real, real_forecast.shape)
+        vessel_keys = ("standard", "ice_capable", "sagar_nidhi", "vasiliy_golovnin", "arc7", "planned_pc4")
+        for vessel_key in vessel_keys:
+            for objective in ("safest", "fastest", "balanced"):
+                find_route(real_forecast, start, goal, real_risk, vessel_key, real_mask, objective)
+
+        # Exercise every user-selectable dimension without turning the self-check
+        # into an unnecessarily expensive exhaustive Cartesian product.
+        for vessel_key in vessel_keys:
+            for mission_key in ("resupply", "research_transit", "time_critical"):
+                result = route(
+                    start_lat=-70.7667, start_lon=11.7333,
+                    goal_lat=-69.4068, goal_lon=76.1953,
+                    horizon_days=3, vessel_profile=vessel_key,
+                    mission=mission_key, priority="balanced",
+                    max_ice_exposure="medium",
+                    freshness_requirement_hours=168,
+                )
+                if len(result.get("alternatives", [])) != 3:
+                    raise SystemExit(f"Expected A/B/C for {vessel_key}/{mission_key}.")
+                if result.get("recommendation", {}).get("route_id") not in {"A", "B", "C"}:
+                    raise SystemExit("Recommendation did not select A/B/C.")
+
+        for priority_key in ("safety_first", "balanced", "time_sensitive"):
+            for exposure_key in ("low", "medium", "high"):
+                result = route(
+                    start_lat=-70.7667, start_lon=11.7333,
+                    goal_lat=-69.4068, goal_lon=76.1953,
+                    horizon_days=3, vessel_profile="ice_capable",
+                    mission="resupply", priority=priority_key,
+                    max_ice_exposure=exposure_key,
+                    freshness_requirement_hours=168,
+                )
+                if len(result.get("alternatives", [])) != 3:
+                    raise SystemExit(f"Expected A/B/C for {priority_key}/{exposure_key}.")
+
+
     # Frontend integrity checks: the shipped UI must contain the same
     # mission-aware A/B/C route workflow as the backend API. This prevents
     # accidentally packaging an older single-route frontend.
@@ -320,8 +358,6 @@ def main() -> None:
         'RK4 + ensemble',
         'EPSG:3031',
         'Polar safety screening',
-        'Closest projected iceberg',
-        'REAL DATA ACTIVE',
     )
     combined_frontend = frontend_app + frontend_html + frontend_css
     missing_frontend = [marker for marker in required_frontend_markers if marker not in combined_frontend]

@@ -1,0 +1,27 @@
+{
+  "status": "gap_detected",
+  "dataset": "NSIDC G02202 V6 Antarctic daily sea-ice concentration",
+  "files_found_raw": 979,
+  "files_with_valid_dates": 979,
+  "unique_observation_dates": 979,
+  "start_date": "2024-01-01",
+  "end_date": "2026-09-07",
+  "missing_dates": [
+    "2026-08-09",
+    "2026-08-10"
+  ],
+  "missing_day_count": 2,
+  "missing_intervals": [
+    {
+      "start_date": "2026-08-09",
+      "end_date": "2026-08-10",
+      "missing_days": 2
+    }
+  ],
+  "duplicate_date_count": 0,
+  "duplicate_file_count": 0,
+  "duplicate_dates": [],
+  "ignored_nonmatching_nc_files": 0,
+  "note": "Missing dates are reported only. No observations are synthesized, interpolated, duplicated, or substituted.",
+  "methodology_note": "Calendar coverage is evaluated using unique dates parsed from NSIDC filenames across the entire directory tree. Multiple files representing the same observation date are treated as duplicate files, not additional observation days."
+}

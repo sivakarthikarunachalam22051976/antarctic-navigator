@@ -679,33 +679,40 @@ button:disabled {
 .screen-review { border:1px solid rgba(242,161,84,.25); background:rgba(242,161,84,.05); }
 .screen-block { border:1px solid rgba(255,100,100,.25); background:rgba(255,100,100,.05); }
 .voyage-notice { margin-top:8px; color:#607780; font-size:8px; line-height:1.45; }
+.validation-panel .validation-result { margin-top: 10px; }
+.validation-card { border: 1px solid rgba(30, 45, 70, .12); border-radius: 10px; padding: 10px; background: rgba(255,255,255,.55); }
+.validation-card .validation-row { display:flex; justify-content:space-between; gap:12px; padding:4px 0; font-size:.86rem; }
+.validation-card .validation-ok { font-weight:700; }
+.validation-card .validation-note { margin-top:8px; font-size:.76rem; line-height:1.4; opacity:.8; }
 
 
-/* Ultimate build: explicit real-data integrity and closest-iceberg context. */
-.data-integrity {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 9px 10px;
-  margin-bottom: 10px;
-  border: 1px solid var(--border, #cbd5e1);
-  border-radius: 7px;
-  font-size: 10px;
-  line-height: 1.35;
-}
-.data-integrity strong { letter-spacing: .06em; font-size: 10px; }
-.data-integrity span { opacity: .78; }
-.data-integrity.real { border-color: #76b89a; }
-.data-integrity.warning { border-color: #d69a58; }
-.closest-berg {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 9px 0;
-  border-top: 1px solid var(--border, #d8dee7);
-  border-bottom: 1px solid var(--border, #d8dee7);
-  margin: 9px 0;
-  font-size: 11px;
-}
-.closest-berg span { opacity: .7; }
-.closest-berg strong { text-align: right; }
+/* Final SIH presentation polish: clearer text without changing the product layout. */
+.panel { width: 380px; }
+.panel-section { padding: 16px 15px; }
+.panel-section h2 { font-size: 13px; color: #c7d6da; }
+.hint { font-size: 13px; line-height: 1.55; color: #9bb0b7; }
+.field-label { font-size: 11px; color: #8fa6ae; }
+select, button { font-size: 13px; }
+select { min-height: 40px; }
+.slider-label { font-size: 13px; }
+.route-result { font-size: 11px; line-height: 1.55; }
+.route-table th, .route-table td { font-size: 10px; }
+.route-table thead th { font-size: 9px; }
+.route-objective { font-size: 9px; color: #8198a1; }
+.table-subtext { font-size: 8px; }
+.recommended-tag { font-size: 8px; }
+.recommendation-title strong { font-size: 13px; }
+.data-used span { font-size: 10px; }
+.human-review-note { font-size: 10px; }
+.source-note { font-size: 11px; }
+.freshness-table th, .freshness-table td { font-size: 9px; }
+.freshness-table thead th { font-size: 9px; }
+.intelligence-note { font-size: 10px; }
+.intelligence-grid strong { font-size: 11px; }
+.voyage-loading, .voyage-notice { font-size: 9px; }
+.voyage-header strong { font-size: 12px; }
+.voyage-metrics strong { font-size: 12px; }
+.route-status-chip, .route-context span { font-size: 9px; }
+.route-key { font-size: 10px; }
+@media (max-width: 900px) { .panel { width: 330px; } }
+@media (max-width: 700px) { .panel { width: 300px; } }

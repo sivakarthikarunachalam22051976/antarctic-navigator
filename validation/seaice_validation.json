@@ -1,0 +1,142 @@
+{
+  "status": "completed",
+  "source": "Historical NSIDC daily concentration files supplied by user",
+  "forecast_model": "Statistical persistence + seasonal baseline (no historical current/wind forcing supplied to this validator)",
+  "comparison_baseline": "Pure persistence",
+  "full_forcing_model_historical_validation": false,
+  "metrics_are_not_operational_skill": true,
+  "strict_time_matching": true,
+  "files_found": 979,
+  "files_used": 979,
+  "duplicate_dates": [],
+  "missing_dates": [
+    "2026-08-09",
+    "2026-08-10"
+  ],
+  "missing_day_count": 2,
+  "skipped_gap_windows": {
+    "1": 1,
+    "2": 2,
+    "3": 2,
+    "4": 2,
+    "5": 2,
+    "6": 2,
+    "7": 2
+  },
+  "model": {
+    "1": {
+      "windows": 977,
+      "mae": 0.0106515856742587,
+      "rmse": 0.035410631081867414,
+      "bias": 0.0018440147317519042,
+      "correlation": 0.9934708491169586,
+      "grid_samples_per_window": 83019
+    },
+    "2": {
+      "windows": 975,
+      "mae": 0.014322557629792643,
+      "rmse": 0.04930960125568364,
+      "bias": 0.0013936740450449135,
+      "correlation": 0.9877306983114782,
+      "grid_samples_per_window": 83019
+    },
+    "3": {
+      "windows": 974,
+      "mae": 0.016893085395672035,
+      "rmse": 0.0593441375715375,
+      "bias": 0.0009421277105750883,
+      "correlation": 0.9823912517385075,
+      "grid_samples_per_window": 83019
+    },
+    "4": {
+      "windows": 973,
+      "mae": 0.018931294356227146,
+      "rmse": 0.0674356795301511,
+      "bias": 0.0004982134449546357,
+      "correlation": 0.9773558318718788,
+      "grid_samples_per_window": 83019
+    },
+    "5": {
+      "windows": 972,
+      "mae": 0.020695244155271592,
+      "rmse": 0.07449875877131869,
+      "bias": 5.130253664583121e-05,
+      "correlation": 0.9724206248234745,
+      "grid_samples_per_window": 83019
+    },
+    "6": {
+      "windows": 971,
+      "mae": 0.02230199574727655,
+      "rmse": 0.08092751739164354,
+      "bias": -0.00039770834331805474,
+      "correlation": 0.96752987431875,
+      "grid_samples_per_window": 83019
+    },
+    "7": {
+      "windows": 970,
+      "mae": 0.023787811227688995,
+      "rmse": 0.08687700947539712,
+      "bias": -0.0008437717671670635,
+      "correlation": 0.9626735748525266,
+      "grid_samples_per_window": 83019
+    }
+  },
+  "persistence": {
+    "1": {
+      "windows": 977,
+      "mae": 0.0083355270943822,
+      "rmse": 0.03547998964266683,
+      "bias": -0.00024634160585971837,
+      "correlation": 0.9934409516820981,
+      "grid_samples_per_window": 83019
+    },
+    "2": {
+      "windows": 975,
+      "mae": 0.012268115454571566,
+      "rmse": 0.049561507613252835,
+      "bias": -0.0005001574863461903,
+      "correlation": 0.9876829738099688,
+      "grid_samples_per_window": 83019
+    },
+    "3": {
+      "windows": 974,
+      "mae": 0.015068720692893018,
+      "rmse": 0.059670335187904336,
+      "bias": -0.0007553051918819305,
+      "correlation": 0.982334529744876,
+      "grid_samples_per_window": 83019
+    },
+    "4": {
+      "windows": 973,
+      "mae": 0.01732418415046757,
+      "rmse": 0.06779063132845634,
+      "bias": -0.001003022290109124,
+      "correlation": 0.9772957850032695,
+      "grid_samples_per_window": 83019
+    },
+    "5": {
+      "windows": 972,
+      "mae": 0.0192998992198573,
+      "rmse": 0.0748536696048113,
+      "bias": -0.001253949155473706,
+      "correlation": 0.972361578013775,
+      "grid_samples_per_window": 83019
+    },
+    "6": {
+      "windows": 971,
+      "mae": 0.02111568990652928,
+      "rmse": 0.08126181244927189,
+      "bias": -0.0015071201610580155,
+      "correlation": 0.967475075308483,
+      "grid_samples_per_window": 83019
+    },
+    "7": {
+      "windows": 970,
+      "mae": 0.022809732041218236,
+      "rmse": 0.08717468099113634,
+      "bias": -0.0017573422206294096,
+      "correlation": 0.9626255070216154,
+      "grid_samples_per_window": 83019
+    }
+  }
+}

@@ -1,63 +1,72 @@
-# Validation performed in this repository
+# Validation and scientific evidence
 
-## Automated software checks
+Antarctic Navigator now includes an explicit validation workflow so that model claims are tied to measured evidence rather than architecture names.
+
+## A. Historical iceberg trajectory validation
+
+Source: **BYU/NIC consolidated Antarctic iceberg database v8.0** for historical tracks.
 
 Run:
 
 ```powershell
-python scripts\self_check.py
+python backend\data\fetch_byu_historical.py
+python backend\data\validate_byu_historical.py
+python scripts\validate_iceberg_backtest.py --tracks backend\data\real\historical\byu_v8.0
 ```
 
-This check:
+The supplied backtest script first calculates a transparent **constant-velocity benchmark**. It deliberately does not call that RK4 validation. A valid RK4 historical score requires environmental forcing from the same historical dates (currents/wind) so the model receives the information that would actually have been available at the forecast start.
 
-- compiles the backend Python source;
-- loads the bundled synthetic dataset;
-- creates a multi-day sea-ice forecast;
-- projects synthetic icebergs once;
-- builds iceberg risk from already-projected positions;
-- computes a Maitri → Bharati route;
-- validates representative USNIC CSV parsing/date handling;
-- validates compact JSON integrity;
-- exercises the environmental NetCDF regridding helpers with tiny NetCDF fixtures.
+Metrics reported when the benchmark is run:
 
-A compatibility alias is also available:
+- median trajectory error (km)
+- MAE (km)
+- RMSE (km)
+- 90th-percentile error (km)
+
+No value should be inserted into the PPT unless it is produced by the script from held-out observations.
+
+## B. Quantitative sea-ice forecast validation
+
+Use historical NSIDC daily concentration files and run:
 
 ```powershell
-python scripts\smoke_test.py
+python scripts\validate_seaice_forecast.py --data-dir C:\path\to\historical\nsidc
 ```
 
-## API smoke checks
+The validator compares:
 
-The package was checked against the synthetic dataset for:
+1. Antarctic Navigator's **adaptive persistence + seasonal correction fallback**; the live serving path adds conservative semi-Lagrangian advection when matched environmental forcing is available
+2. Pure persistence
 
-- `/`
-- `/api/health`
-- `/api/config`
-- `/api/seaice/grid`
-- `/api/seaice/forecast`
-- `/api/icebergs`
-- `/api/icebergs/projected`
-- `/api/route`
+for 1–7 day horizons, reporting:
 
-## Real-data checks
+- MAE
+- RMSE
+- bias
+- Pearson correlation
 
-The real-data scripts validate downloaded file existence/non-empty content, real observation dates, required variables/coordinates, and source metadata. The converter also uses the G10016 V4 surface-type mask when present.
+This makes the baseline measurable before any ML model is introduced.
 
-Current real environmental forcing support:
+## C. Route robustness
 
-- OSCAR NRT currents can be downloaded and regridded into `current_u/current_v`; the validator requires a decoded source date and retrieval timestamp when this source is present.
-- ERA5 wind can be downloaded and regridded into `wind_u/wind_v` when CDS credentials are configured; the validator requires a decoded analysis date and retrieval timestamp when this source is present.
-- Real-bundle validation also exercises the standard-vessel Maitri → Bharati route against the current risk-weighted router.
+The current real-data bundle can be stress-tested without pretending that iceberg uncertainty is perfectly known:
 
-## Scientific/operational validation still required
+```powershell
+$env:USE_REAL_DATA="1"
+$env:ALLOW_SYNTHETIC_FALLBACK="0"
+python scripts\route_robustness.py --horizon 3 --vessel standard
+```
 
-No software-only test can establish operational navigation safety. The following require domain data and historical backtesting:
+The test applies ±5 km, ±10 km and ±20 km radial position perturbations in eight bearings. It reports reroute success and the risk experienced by the baseline corridor under the perturbed fields.
 
-- sea-ice forecast skill;
-- iceberg trajectory error against held-out tracks;
-- uncertainty calibration;
-- vessel-specific fuel/time modeling;
-- route performance against historical conditions;
-- operational maritime review and certification, if ever pursued.
+The result is **sensitivity analysis**, not a confidence interval or a probability-of-collision estimate.
 
-This remains decision-support software, not certified navigation software.
+## D. Model comparison policy
+
+A future ML model should be compared with the transparent baseline only after the baseline has been scored on held-out historical observations. The comparison should use the same dates, same target variables and same metrics.
+
+The project intentionally does not claim a ConvLSTM/CNN/LSTM/U-Net/Random Forest/XGBoost/Transformer model in the MVP. Model complexity is not treated as evidence of predictive skill.
+
+## Operational limitation
+
+No software-only test establishes navigation safety. Operational deployment would additionally require validated vessel-specific performance, higher-resolution/operational ice information, uncertainty calibration, domain-expert review and regulatory/certification processes.

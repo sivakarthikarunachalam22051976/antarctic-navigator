@@ -27,7 +27,7 @@
         </div>
       </div>
 
-      <div class="status" id="status-indicator">
+      <div class="status" id="status-indicator" title="Human-in-the-loop decision support; not autonomous navigation">
         <span class="dot"></span>
         <span id="status-text">Loading…</span>
       </div>
@@ -101,7 +101,7 @@
             <option value="168">&lt; 168h</option>
           </select>
 
-          <div class="intelligence-note">Predictive + physics-informed decision intelligence · human in the loop</div>
+          <div class="intelligence-note">Predictive + physics-informed decision intelligence · statistical sea-ice forecast · RK4 iceberg drift · human in the loop</div>
           <p class="hint">
             The engine scores route alternatives against the mission, vessel and selected constraints.
           </p>
@@ -176,6 +176,13 @@
           </h2>
 
           <div id="iceberg-list" class="iceberg-list"></div>
+        </section>
+
+        <section class="panel-section validation-panel">
+          <h2>Validation &amp; robustness</h2>
+          <p class="hint">Sensitivity testing checks whether the route remains feasible when projected iceberg positions are perturbed. It is not a confidence interval.</p>
+          <button id="run-robustness-btn" class="secondary">Run robustness test</button>
+          <div id="robustness-result" class="validation-result"></div>
         </section>
 
         <section class="panel-section freshness-panel">

@@ -1,0 +1,59 @@
+{
+  "version": "release-validation",
+  "real_data_required": true,
+  "checks": {
+    "self_check": {
+      "command": [
+        "C:\\Users\\user\\Documents\\antarctic-navigator\\venv\\Scripts\\python.exe",
+        "scripts/self_check.py"
+      ],
+      "returncode": 0,
+      "stdout": "SELF_CHECK_OK {'route_waypoints': 147, 'route_cost': 261.565, 'synthetic_icebergs': 16, 'usnic_fixture_records': 2, 'environmental_regrid': 'ok', 'mission_aware_routes': ['A', 'B', 'C']}\n",
+      "stderr": ""
+    },
+    "real_bundle": {
+      "command": [
+        "C:\\Users\\user\\Documents\\antarctic-navigator\\venv\\Scripts\\python.exe",
+        "scripts/validate_real_bundle.py"
+      ],
+      "returncode": 0,
+      "stdout": "{'status': 'ok', 'bundle': 'C:\\\\Users\\\\user\\\\Documents\\\\antarctic-navigator\\\\backend\\\\data\\\\real\\\\navigator_bundle.json', 'shape': (60, 180), 'icebergs': 11, 'dataset_kind': 'real_seaice_usnic_icebergs', 'observation_date': '2026-09-09', 'bundle_generated_at_utc': '2026-09-10T16:19:21.089305+00:00', 'sea_ice_retrieved_at_utc': '2026-09-10T16:18:17.176298+00:00', 'iceberg_observation_date': '2026-09-10', 'iceberg_retrieved_at_utc': '2026-09-10T16:18:19.942159+00:00', 'current_observation_date': '2026-09-03', 'current_retrieved_at_utc': '2026-09-08T18:02:18+00:00', 'wind_observation_date': '2026-09-03', 'wind_retrieved_at_utc': '2026-09-10T21:49:18+00:00', 'environmental_forcing': 'OSCAR NRT surface currents + ERA5 10-m wind', 'route_check': 'Maitri-to-Bharati ok'}\n",
+      "stderr": ""
+    },
+    "route_robustness": {
+      "command": [
+        "C:\\Users\\user\\Documents\\antarctic-navigator\\venv\\Scripts\\python.exe",
+        "scripts/route_robustness.py",
+        "--horizon",
+        "3",
+        "--vessel",
+        "standard"
+      ],
+      "returncode": 0,
+      "stdout": "{\n  \"status\": \"completed\",\n  \"method\": \"Deterministic radial iceberg-position sensitivity test; 8 bearings per perturbation.\",\n  \"not_a_confidence_interval\": true,\n  \"data_mode\": \"real_seaice_usnic_icebergs\",\n  \"sea_ice_observation_date\": \"2026-09-09\",\n  \"iceberg_observation_date\": \"2026-09-10\",\n  \"horizon_days\": 3,\n  \"vessel_profile\": \"standard\",\n  \"baseline\": {\n    \"distance_km\": 3411.920284976444,\n    \"risk_score\": 0.7261869648258811,\n    \"max_iceberg_risk\": 0.8948393168143698,\n    \"exposure_band\": \"High\",\n    \"waypoints\": 139\n  },\n  \"scenarios\": [\n    {\n      \"perturbation_km\": 5.0,\n      \"directions_tested\": 8,\n      \"reroute_success_rate\": 1.0,\n      \"baseline_recommended_path_high_risk_fraction\": 0.0,\n      \"worst_case_baseline_path_max_iceberg_risk\": 1.0,\n      \"worst_case_baseline_path_mean_iceberg_risk\": 0.05288737535882785,\n      \"worst_case_rerouted_max_iceberg_risk\": 0.8948393168143698\n    },\n    {\n      \"perturbation_km\": 10.0,\n      \"directions_tested\": 8,\n      \"reroute_success_rate\": 1.0,\n      \"baseline_recommended_path_high_risk_fraction\": 0.0,\n      \"worst_case_baseline_path_max_iceberg_risk\": 1.0,\n      \"worst_case_baseline_path_mean_iceberg_risk\": 0.05669087634247657,\n      \"worst_case_rerouted_max_iceberg_risk\": 0.8948393168143698\n    },\n    {\n      \"perturbation_km\": 20.0,\n      \"directions_tested\": 8,\n      \"reroute_success_rate\": 1.0,\n      \"baseline_recommended_path_high_risk_fraction\": 0.0,\n      \"worst_case_baseline_path_max_iceberg_risk\": 1.0,\n      \"worst_case_baseline_path_mean_iceberg_risk\": 0.06606042689064572,\n      \"worst_case_rerouted_max_iceberg_risk\": 1.0\n    }\n  ],\n  \"interpretation\": \"Robustness is stronger when rerouting remains feasible and the baseline path does not enter high iceberg-risk cells under the tested perturbations.\"\n}\nSaved: C:\\Users\\user\\Documents\\antarctic-navigator\\validation\\route_robustness.json\n",
+      "stderr": ""
+    },
+    "iceberg_historical": {
+      "command": [
+        "C:\\Users\\user\\Documents\\antarctic-navigator\\venv\\Scripts\\python.exe",
+        "scripts/validate_iceberg_backtest.py",
+        "--tracks",
+        "C:\\Users\\user\\Documents\\antarctic-navigator\\backend\\data\\real\\historical\\byu_v8.0"
+      ],
+      "returncode": 0,
+      "stdout": "{\n  \"status\": \"benchmark_only\",\n  \"tracks\": 607,\n  \"source\": \"BYU/NIC consolidated Antarctic iceberg database v8.0\",\n  \"matching_method\": \"Strict exact calendar-date matching. Initialization requires an observation exactly one day before the start date.\",\n  \"coordinate_source_priority\": [\n    \"NIC\",\n    \"ASCAT\",\n    \"OSCAT\",\n    \"QSCAT\",\n    \"ERS\"\n  ],\n  \"parse_stats\": {\n    \"csv_files_scanned\": 647,\n    \"rows_seen\": 516691,\n    \"usable_rows\": 515958,\n    \"files_with_usable_rows\": 638,\n    \"files_skipped_no_date\": 0,\n    \"files_skipped_no_coordinates\": 9,\n    \"tracks\": 607\n  },\n  \"warning\": \"This run scores a transparent constant-velocity benchmark. It does NOT claim RK4 historical validation because matching historical current/wind forcing was not supplied.\",\n  \"metrics\": {\n    \"1\": {\n      \"samples\": 508830,\n      \"median_error_km\": 0.0,\n      \"mae_km\": 374.2979957848015,\n      \"rmse_km\": 1920.4407666336654,\n      \"p90_error_km\": 6.1248416362138585,\n      \"p95_error_km\": 18.977859362495728,\n      \"max_error_km\": 19872.87669511787,\n      \"errors_over_100km\": 20558,\n      \"model\": \"constant-velocity historical benchmark\"\n    },\n    \"3\": {\n      \"samples\": 505804,\n      \"median_error_km\": 0.0,\n      \"mae_km\": 625.3180302300314,\n      \"rmse_km\": 2644.007165319291,\n      \"p90_error_km\": 26.93702104885234,\n      \"p95_error_km\": 8139.270436042785,\n      \"max_error_km\": 19900.959450356557,\n      \"errors_over_100km\": 31299,\n      \"model\": \"constant-velocity historical benchmark\"\n    }\n  }\n}\n",
+      "stderr": ""
+    },
+    "seaice_historical": {
+      "command": [
+        "C:\\Users\\user\\Documents\\antarctic-navigator\\venv\\Scripts\\python.exe",
+        "scripts/validate_seaice_forecast.py",
+        "--data-dir",
+        "C:\\Users\\user\\Documents\\antarctic-navigator\\backend\\data\\real\\historical\\nsidc"
+      ],
+      "returncode": 0,
+      "stdout": "{\n  \"status\": \"completed\",\n  \"source\": \"Historical NSIDC daily concentration files supplied by user\",\n  \"forecast_model\": \"Statistical persistence + seasonal baseline (no historical current/wind forcing supplied to this validator)\",\n  \"comparison_baseline\": \"Pure persistence\",\n  \"full_forcing_model_historical_validation\": false,\n  \"metrics_are_not_operational_skill\": true,\n  \"strict_time_matching\": true,\n  \"files_found\": 979,\n  \"files_used\": 979,\n  \"duplicate_dates\": [],\n  \"missing_dates\": [\n    \"2026-08-09\",\n    \"2026-08-10\"\n  ],\n  \"missing_day_count\": 2,\n  \"skipped_gap_windows\": {\n    \"1\": 1,\n    \"2\": 2,\n    \"3\": 2,\n    \"4\": 2,\n    \"5\": 2,\n    \"6\": 2,\n    \"7\": 2\n  },\n  \"model\": {\n    \"1\": {\n      \"windows\": 977,\n      \"mae\": 0.0106515856742587,\n      \"rmse\": 0.035410631081867414,\n      \"bias\": 0.0018440147317519042,\n      \"correlation\": 0.9934708491169586,\n      \"grid_samples_per_window\": 83019\n    },\n    \"2\": {\n      \"windows\": 975,\n      \"mae\": 0.014322557629792643,\n      \"rmse\": 0.04930960125568364,\n      \"bias\": 0.0013936740450449135,\n      \"correlation\": 0.9877306983114782,\n      \"grid_samples_per_window\": 83019\n    },\n    \"3\": {\n      \"windows\": 974,\n      \"mae\": 0.016893085395672035,\n      \"rmse\": 0.0593441375715375,\n      \"bias\": 0.0009421277105750883,\n      \"correlation\": 0.9823912517385075,\n      \"grid_samples_per_window\": 83019\n    },\n    \"4\": {\n      \"windows\": 973,\n      \"mae\": 0.018931294356227146,\n      \"rmse\": 0.0674356795301511,\n      \"bias\": 0.0004982134449546357,\n      \"correlation\": 0.9773558318718788,\n      \"grid_samples_per_window\": 83019\n    },\n    \"5\": {\n      \"windows\": 972,\n      \"mae\": 0.020695244155271592,\n      \"rmse\": 0.07449875877131869,\n      \"bias\": 5.130253664583121e-05,\n      \"correlation\": 0.9724206248234745,\n      \"grid_samples_per_window\": 83019\n    },\n    \"6\": {\n      \"windows\": 971,\n      \"mae\": 0.02230199574727655,\n      \"rmse\": 0.08092751739164354,\n      \"bias\": -0.00039770834331805474,\n      \"correlation\": 0.96752987431875,\n      \"grid_samples_per_window\": 83019\n    },\n    \"7\": {\n      \"windows\": 970,\n      \"mae\": 0.023787811227688995,\n      \"rmse\": 0.08687700947539712,\n      \"bias\": -0.0008437717671670635,\n      \"correlation\": 0.9626735748525266,\n      \"grid_samples_per_window\": 83019\n    }\n  },\n  \"persistence\": {\n    \"1\": {\n      \"windows\": 977,\n      \"mae\": 0.0083355270943822,\n      \"rmse\": 0.03547998964266683,\n      \"bias\": -0.00024634160585971837,\n      \"correlation\": 0.9934409516820981,\n      \"grid_samples_per_window\": 83019\n    },\n    \"2\": {\n      \"windows\": 975,\n      \"mae\": 0.012268115454571566,\n      \"rmse\": 0.049561507613252835,\n      \"bias\": -0.0005001574863461903,\n      \"correlation\": 0.9876829738099688,\n      \"grid_samples_per_window\": 83019\n    },\n    \"3\": {\n      \"windows\": 974,\n      \"mae\": 0.015068720692893018,\n      \"rmse\": 0.059670335187904336,\n      \"bias\": -0.0007553051918819305,\n      \"correlation\": 0.982334529744876,\n      \"grid_samples_per_window\": 83019\n    },\n    \"4\": {\n      \"windows\": 973,\n      \"mae\": 0.01732418415046757,\n      \"rmse\": 0.06779063132845634,\n      \"bias\": -0.001003022290109124,\n      \"correlation\": 0.9772957850032695,\n      \"grid_samples_per_window\": 83019\n    },\n    \"5\": {\n      \"windows\": 972,\n      \"mae\": 0.0192998992198573,\n      \"rmse\": 0.0748536696048113,\n      \"bias\": -0.001253949155473706,\n      \"correlation\": 0.972361578013775,\n      \"grid_samples_per_window\": 83019\n    },\n    \"6\": {\n      \"windows\": 971,\n      \"mae\": 0.02111568990652928,\n      \"rmse\": 0.08126181244927189,\n      \"bias\": -0.0015071201610580155,\n      \"correlation\": 0.967475075308483,\n      \"grid_samples_per_window\": 83019\n    },\n    \"7\": {\n      \"windows\": 970,\n      \"mae\": 0.022809732041218236,\n      \"rmse\": 0.08717468099113634,\n      \"bias\": -0.0017573422206294096,\n      \"correlation\": 0.9626255070216154,\n      \"grid_samples_per_window\": 83019\n    }\n  }\n}\nSaved: C:\\Users\\user\\Documents\\antarctic-navigator\\validation\\seaice_validation.json\n",
+      "stderr": ""
+    }
+  }
+}

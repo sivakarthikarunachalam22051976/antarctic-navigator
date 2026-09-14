@@ -1,0 +1,47 @@
+{
+  "status": "completed",
+  "method": "Deterministic radial iceberg-position sensitivity test; 8 bearings per perturbation.",
+  "not_a_confidence_interval": true,
+  "data_mode": "real_seaice_usnic_icebergs",
+  "sea_ice_observation_date": "2026-09-09",
+  "iceberg_observation_date": "2026-09-10",
+  "horizon_days": 3,
+  "vessel_profile": "standard",
+  "baseline": {
+    "distance_km": 3411.920284976444,
+    "risk_score": 0.7261869648258811,
+    "max_iceberg_risk": 0.8948393168143698,
+    "exposure_band": "High",
+    "waypoints": 139
+  },
+  "scenarios": [
+    {
+      "perturbation_km": 5.0,
+      "directions_tested": 8,
+      "reroute_success_rate": 1.0,
+      "baseline_recommended_path_high_risk_fraction": 0.0,
+      "worst_case_baseline_path_max_iceberg_risk": 1.0,
+      "worst_case_baseline_path_mean_iceberg_risk": 0.05288737535882785,
+      "worst_case_rerouted_max_iceberg_risk": 0.8948393168143698
+    },
+    {
+      "perturbation_km": 10.0,
+      "directions_tested": 8,
+      "reroute_success_rate": 1.0,
+      "baseline_recommended_path_high_risk_fraction": 0.0,
+      "worst_case_baseline_path_max_iceberg_risk": 1.0,
+      "worst_case_baseline_path_mean_iceberg_risk": 0.05669087634247657,
+      "worst_case_rerouted_max_iceberg_risk": 0.8948393168143698
+    },
+    {
+      "perturbation_km": 20.0,
+      "directions_tested": 8,
+      "reroute_success_rate": 1.0,
+      "baseline_recommended_path_high_risk_fraction": 0.0,
+      "worst_case_baseline_path_max_iceberg_risk": 1.0,
+      "worst_case_baseline_path_mean_iceberg_risk": 0.06606042689064572,
+      "worst_case_rerouted_max_iceberg_risk": 1.0
+    }
+  ],
+  "interpretation": "Robustness is stronger when rerouting remains feasible and the baseline path does not enter high iceberg-risk cells under the tested perturbations."
+}

@@ -28,9 +28,9 @@ Do not claim that polar route optimisation itself has never been built; related 
 
 Visual data flow:
 
-`NSIDC sea ice + USNIC iceberg observations + OSCAR NRT currents + ERA5 wind → data normalisation → sea-ice forecast + physics-informed iceberg drift → risk field → A* Route A/B/C → mission-aware recommendation → FastAPI → Leaflet`
+`NSIDC sea ice + USNIC iceberg observations + OSCAR NRT currents + ERA5 wind → data normalisation → statistical sea-ice forecast + RK4 physics-informed iceberg drift → vessel-aware risk assessment → risk field → A* Route A/B/C → mission-aware recommendation → FastAPI → Leaflet`
 
-Show the real-data freshness/provenance panel. The current prototype's sea-ice forecast is a transparent baseline and the iceberg model is a simplified physics-informed free-drift approximation; do not present either as a trained deep-learning model.
+Show the real-data freshness/provenance panel. The current prototype uses a transparent hybrid sea-ice forecast: persistence + seasonal correction, plus conservative semi-Lagrangian advection when matched OSCAR/ERA5 forcing is available. The iceberg model is a simplified physics-informed free-drift approximation integrated with RK4. Do not present either as a trained ML/deep-learning model.
 
 ## Slide 4 — Feasibility & Viability
 

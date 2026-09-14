@@ -1,7 +1,7 @@
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-const API_BASE = (import.meta.env.VITE_API_BASE || "http://localhost:8000").replace(/\/$/, "");
+const API_BASE = (import.meta.env.VITE_API_BASE || "https://antarctic-navigator.onrender.com").replace(/\/$/, "");
 const REQUEST_TIMEOUT_MS = 15000;
 const ROUTE_TIMEOUT_MS = 30000;
 
@@ -91,13 +91,7 @@ function renderDataStatus(status) {
       </tr>`;
   }).join("");
 
-  const realActive = status.real_data_active === true;
-  const integrity = realActive
-    ? `<div class="data-integrity real"><strong>REAL DATA ACTIVE</strong><span>Source-derived environmental bundle is driving this application.</span></div>`
-    : `<div class="data-integrity warning"><strong>SYNTHETIC / OFFLINE MODE</strong><span>Not suitable for the real-data demonstration.</span></div>`;
-
   container.innerHTML = `
-    ${integrity}
     <div class="freshness-table-wrap">
       <table class="freshness-table">
         <thead>
@@ -134,7 +128,6 @@ function setStatus(message, ok = false) {
 }
 
 function displayDatasetLabel(meta = {}) {
-  if (meta.real_data_active === true) return "REAL DATA ACTIVE · NSIDC + USNIC + OSCAR + ERA5";
   const kind = String(meta.dataset_kind || "unknown");
   if (kind === "real_seaice_and_usnic_icebergs" || kind === "real_seaice_usnic_icebergs") return "Real sea ice + USNIC icebergs";
   if (kind === "real_seaice_only") return "Real NSIDC sea ice";
@@ -590,11 +583,6 @@ function renderRouteAlternatives(data) {
         <div><span>Max ice</span><strong>${(100 * recommended.max_ice_concentration).toFixed(0)}%</strong></div>
         <div><span>Max iceberg risk</span><strong>${(100 * recommended.max_iceberg_risk).toFixed(0)}%</strong></div>
       </div>
-      ${recommended.closest_projected_iceberg ? `
-      <div class="closest-berg">
-        <span>Closest projected iceberg</span>
-        <strong>${escapeHtml(recommended.closest_projected_iceberg.name)} · ${Number(recommended.closest_projected_iceberg.distance_km).toFixed(1)} km</strong>
-      </div>` : ""}
       <div class="recommendation-why">
         <strong>Why selected?</strong>
         <ul>${explanation || "<li>Selected by the mission-aware recommendation layer.</li>"}</ul>
@@ -690,6 +678,34 @@ document.getElementById("compute-route-btn").addEventListener("click", async () 
     setStatus(`3 decision routes + voyage simulation computed`, true);
   } catch (error) {
     result.innerHTML = `<span class="err">${escapeHtml(error.message)}</span>`;
+  }
+});
+
+
+document.getElementById("run-robustness-btn")?.addEventListener("click", async () => {
+  const result = document.getElementById("robustness-result");
+  const button = document.getElementById("run-robustness-btn");
+  if (!result || !button) return;
+  button.disabled = true;
+  result.innerHTML = `<div class="validation-card">Running iceberg-position sensitivity test…</div>`;
+  try {
+    const query = new URLSearchParams({
+      horizon_days: currentForecast,
+      vessel_profile: document.getElementById("vessel-profile").value,
+    });
+    const data = await fetchJson(`/api/validation/robustness?${query}`, ROUTE_TIMEOUT_MS);
+    const rows = (data.scenarios || []).map((row) => `
+      <div class="validation-row"><span>±${Number(row.perturbation_km).toFixed(0)} km</span><strong>${(100 * Number(row.reroute_success_rate)).toFixed(0)}% reroute success</strong></div>
+      <div class="validation-row"><span>Baseline path below high iceberg risk</span><strong>${(100 * Number(row.baseline_path_below_high_iceberg_risk_rate)).toFixed(0)}%</strong></div>
+    `).join("");
+    result.innerHTML = `<div class="validation-card">
+      ${rows}
+      <div class="validation-note">${escapeHtml(data.interpretation || "Sensitivity test only; not a confidence interval.")}</div>
+    </div>`;
+  } catch (error) {
+    result.innerHTML = `<div class="validation-card">Robustness test unavailable: ${escapeHtml(error.message)}</div>`;
+  } finally {
+    button.disabled = false;
   }
 });
 

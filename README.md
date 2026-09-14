@@ -1,29 +1,23 @@
 # Antarctic Navigator — Ultimate Mission-Aware Polar Decision-Support Prototype
 
-**Build: v0.5.0 · SIH26059**
+**Build: v0.6.1 · SIH26059**
 
 **SIH26059 · Software**
 
 Antarctic Navigator is a decision-support prototype for Antarctic logistics. It combines sea-ice concentration, iceberg observations, simplified iceberg drift physics, vessel-specific routing costs, and risk-aware A* pathfinding.
 
-## Real-data integrity
-
-Real source-derived data is the production default (`USE_REAL_DATA=1`). The backend will not silently substitute the synthetic fixture. If the real bundle is missing, startup fails unless an operator explicitly sets `ALLOW_SYNTHETIC_FALLBACK=1` for offline software testing. The packaged real bundle contains NSIDC G10016 v4 sea ice, USNIC iceberg observations, OSCAR NRT currents and ERA5 wind metadata.
-
-Synthetic data remains in the repository only for deterministic automated tests and offline development.
-
 ## What the complete build supports
 
-This package is the Antarctic Navigator codebase upgraded with selected, defensible capabilities observed in a separate public SIH26059 reference implementation. It does **not** copy that project's code, synthetic environmental fields, trained weights, or unsupported performance claims. The production/demo path remains grounded in the packaged source-derived real-data bundle.
+This package combines the strongest defensible ideas from our earlier MVP with additional physics, geometry, vessel-performance and voyage-intelligence layers. It does **not** copy or claim unvalidated competitor results; every new layer is labelled according to what the available data actually supports.
 
 - **NSIDC G10016 Version 4** — current near-real-time Antarctic sea-ice input.
 - **USNIC Antarctic Icebergs** — current weekly iceberg observations.
 - **OSCAR NRT V2.0** — optional real surface-current forcing for iceberg drift.
 - **ERA5 10-m winds** — optional recent/reanalysis wind forcing for iceberg drift; this is not an instantaneous live forecast.
-- **Transparent sea-ice forecast baseline** — short horizon, not a trained ML model.
+- **Transparent sea-ice forecast baseline** — statistical persistence + seasonal baseline for a short 1–7 day horizon; not a trained ML model.
 - **RK4 iceberg drift + uncertainty ensemble** — fourth-order numerical integration of the transparent free-drift field, with a small screening ensemble around the projected position.
 - **Physics-informed vessel performance** — transparent Lindqvist-inspired ice-resistance scaling estimates attainable speed degradation by vessel profile; it is clearly labelled as a planning model, not a certified hull-performance model.
-- **Polar safety screening** — vessel ice-class/concentration screening inspired by the POLARIS concept, explicitly marked as non-regulatory and not a full POLARIS implementation.
+- **Polar safety screening** — vessel/concentration screening with POLARIS used only as safety-reference context; not a POLARIS regulatory implementation or certification.
 - **EPSG:3031 geometry** — Antarctic polar stereographic coordinates are available for route endpoints and future polar map upgrades while the current Leaflet UI remains simple and familiar.
 - **Risk-weighted A*** — partial sea ice receives a steep cost; 100% concentration cells remain hard exclusions; route results include an environmental-exposure assessment.
 - **Mission-aware route alternatives** — returns Route A (Safest), Route B (Fastest) and Route C (Balanced), then recommends the best candidate for the selected mission and operational priority.
@@ -35,6 +29,7 @@ This package is the Antarctic Navigator codebase upgraded with selected, defensi
 - **BYU/NIC v8.0** — historical iceberg-track validation/backtesting source.
 - **Synthetic fallback** — fully offline demo data remains bundled for reliability.
 - **Offline-first architecture** — no external API key is required for the core demo; the real-data bundle can be refreshed separately when connectivity is available.
+- **No trained ML stack in the MVP** — no ConvLSTM, CNN, LSTM, U-Net, Random Forest, XGBoost, Transformer, PyTorch or TensorFlow model is claimed or required.
 
 ## Data-status honesty
 
@@ -270,20 +265,3 @@ python scripts\self_check.py
 Software checks validate the bundled prototype and parser/regridding logic. Scientific/operational accuracy still requires historical backtesting, uncertainty calibration, vessel-performance validation, and domain review.
 
 This is decision-support software, not certified maritime navigation software.
-
-
-## Why these additions were selected
-
-| Capability | Antarctic Navigator | Added from reference idea | Data/claim boundary |
-|---|---|---|---|
-| Real environmental bundle | Yes | — | NSIDC + USNIC + OSCAR + ERA5 |
-| Mission-aware A/B/C routing | Yes | — | Same A* engine, different objectives |
-| RK4 iceberg drift | Yes | Yes | Physics-informed, not operationally validated |
-| Uncertainty ensemble | Yes | Yes | Screening uncertainty, not calibrated probability |
-| Vessel performance | Yes | Yes | Planning approximation, not certified hull performance |
-| POLARIS layer | Screening | Yes | Reference/screening only, not regulatory certification |
-| EPSG:3031 geometry | Yes | Yes | Endpoint/path geometry support |
-| Voyage simulation | Yes | Yes | ETA/fuel planning proxy, not measured savings |
-| Synthetic-trained ML models | No | Deliberately excluded | Avoids presenting unvalidated/synthetic-trained AI as operational |
-| Full autonomous navigation | No | Deliberately excluded | Human operator remains in control |
-

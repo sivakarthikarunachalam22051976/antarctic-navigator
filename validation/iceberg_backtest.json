@@ -1,0 +1,31 @@
+{
+  "status": "benchmark_only",
+  "tracks": 615,
+  "source": "BYU/NIC consolidated Antarctic iceberg database v8.0",
+  "parse_stats": {
+    "csv_files_scanned": 647,
+    "zip_files_scanned": 0,
+    "rows_seen": 516691,
+    "usable_rows": 516559,
+    "tracks": 615
+  },
+  "warning": "This run scores a transparent constant-velocity benchmark. It does NOT claim RK4 historical validation because matching historical current/wind forcing was not supplied.",
+  "metrics": {
+    "1": {
+      "samples": 515276,
+      "median_error_km": 0.0,
+      "mae_km": 385.0095994579761,
+      "rmse_km": 1945.8868019894644,
+      "p90_error_km": 6.5293414101176275,
+      "model": "constant-velocity historical benchmark"
+    },
+    "3": {
+      "samples": 514203,
+      "median_error_km": 0.0,
+      "mae_km": 641.0208527042845,
+      "rmse_km": 2671.788165116045,
+      "p90_error_km": 28.994968176017892,
+      "model": "constant-velocity historical benchmark"
+    }
+  }
+}

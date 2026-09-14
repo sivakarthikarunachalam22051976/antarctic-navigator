@@ -44,7 +44,7 @@ from models.seaice_forecast import forecast_concentration
 
 app = FastAPI(
     title="Antarctic Navigator API",
-    version="1.5.0",
+    version="1.6.0",
     description=(
         "Predictive and physics-informed Antarctic route decision-support prototype with mission-aware alternatives."
     ),
@@ -848,6 +848,14 @@ def config() -> dict[str, Any]:
         },
         "ice_exposure_limits": ICE_EXPOSURE_LIMITS,
         "freshness_options_hours": [24, 48, 72, 168],
+        "decision_intelligence": {
+            "sea_ice_forecast": "Hybrid persistence + seasonal correction + semi-Lagrangian environmental advection when forcing is available",
+            "iceberg_drift": "Physics-informed free-drift with RK4 integration + uncertainty ensemble",
+            "vessel_risk": "Vessel-aware ice exposure and planning-performance screening",
+            "route_optimisation": "Risk-aware A* graph optimisation with mission/priority ranking",
+            "machine_learning": False,
+            "autonomous_control": False,
+        },
         "grid": {
             "lat_min": GRID_LAT_MIN,
             "lat_max": GRID_LAT_MAX,
@@ -890,6 +898,11 @@ def seaice_forecast(
         int(dataset["meta"].get("day_of_year", 1)),
         dataset["lat_grid"],
         horizon_days,
+        current_u=dataset["current_u"],
+        current_v=dataset["current_v"],
+        wind_u=dataset["wind_u"],
+        wind_v=dataset["wind_v"],
+        lon_grid=dataset["lon_grid"],
     )
     return {
         "horizon_days": horizon_days,
@@ -950,6 +963,11 @@ def route(
         int(dataset["meta"].get("day_of_year", 1)),
         dataset["lat_grid"],
         horizon_days,
+        current_u=dataset["current_u"],
+        current_v=dataset["current_v"],
+        wind_u=dataset["wind_u"],
+        wind_v=dataset["wind_v"],
+        lon_grid=dataset["lon_grid"],
     )
     target = forecast[horizon_days - 1]
     projected = project_icebergs(dataset["icebergs"], horizon_days * 24)
@@ -1104,9 +1122,12 @@ def route(
             "goal_xy_m": [round(v, 1) for v in polar_stereographic_xy(goal_lat, goal_lon)],
         },
         "intelligence": {
-            "iceberg_trajectory": "RK4 free-drift + uncertainty ensemble",
-            "ship_performance": "Lindqvist-inspired ice resistance planning model",
-            "safety_layer": "POLARIS-inspired screening only; not regulatory certification",
+            "sea_ice_forecast": "Hybrid persistence + seasonal correction + semi-Lagrangian environmental advection when forcing is available",
+            "iceberg_trajectory": "Physics-informed free-drift + RK4 integration + uncertainty ensemble",
+            "ship_performance": "Lindqvist-inspired relative ice-resistance planning model",
+            "safety_layer": "Vessel-aware polar safety screening; POLARIS is reference context only",
+            "machine_learning": False,
+            "autonomous_control": False,
         },
         "mission": mission,
         "mission_label": MISSION_PROFILES[mission]["label"],
@@ -1146,6 +1167,140 @@ def route(
             or recommended["route_assessment"].startswith("High")
         ),
         "candidate_warnings": route_errors,
+    }
+
+
+
+@app.get("/api/validation/robustness")
+def validation_robustness(
+    horizon_days: int = Query(3, ge=1, le=7),
+    vessel_profile: str = Query("standard"),
+) -> dict[str, Any]:
+    """Run deterministic iceberg-position stress tests on the current real bundle."""
+    if vessel_profile not in VESSEL_PROFILES:
+        raise HTTPException(status_code=400, detail="Unknown vessel_profile.")
+    dataset = get_dataset()
+    if not bool(dataset["meta"].get("real_data_active")):
+        raise HTTPException(status_code=503, detail="Robustness testing requires the real navigator bundle.")
+
+    start_row, start_col, start_snapped = _route_cell_for_point(
+        INDIAN_STATIONS["Maitri"]["lat"], INDIAN_STATIONS["Maitri"]["lon"]
+    )
+    goal_row, goal_col, goal_snapped = _route_cell_for_point(
+        INDIAN_STATIONS["Bharati"]["lat"], INDIAN_STATIONS["Bharati"]["lon"]
+    )
+    start = (start_row, start_col)
+    goal = (goal_row, goal_col)
+    forecast = forecast_concentration(
+        dataset["concentration"],
+        int(dataset["meta"].get("day_of_year", 1)),
+        dataset["lat_grid"],
+        horizon_days,
+        current_u=dataset["current_u"],
+        current_v=dataset["current_v"],
+        wind_u=dataset["wind_u"],
+        wind_v=dataset["wind_v"],
+        lon_grid=dataset["lon_grid"],
+    )
+    target = forecast[horizon_days - 1]
+    projected = project_icebergs(dataset["icebergs"], horizon_days * 24)
+    base_risk = iceberg_risk_grid(projected, target.shape)
+    try:
+        base_path, base_cost = find_route(
+            target, start, goal, base_risk, vessel_profile,
+            dataset["navigable_mask"], objective="balanced"
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    def path_risk(path: list[tuple[int, int]], risk_grid: np.ndarray) -> dict[str, float]:
+        values = np.asarray([risk_grid[r, c] for r, c in path], dtype=float)
+        return {
+            "mean": float(values.mean()) if len(values) else 0.0,
+            "max": float(values.max()) if len(values) else 0.0,
+            "high_fraction": float(np.mean(values >= 0.75)) if len(values) else 0.0,
+        }
+
+    def move_km(lat: float, lon: float, distance_km: float, bearing_deg: float) -> tuple[float, float]:
+        br = math.radians(bearing_deg)
+        dlat = distance_km * math.cos(br) / 111.32
+        dlon = distance_km * math.sin(br) / max(10.0, 111.32 * math.cos(math.radians(lat)))
+        return lat + dlat, lon + dlon
+
+    scenarios: list[dict[str, Any]] = []
+    bearings = tuple(range(0, 360, 45))
+    for distance_km in (5.0, 10.0, 20.0):
+        successful = 0
+        worst_baseline = 0.0
+        worst_mean = 0.0
+        baseline_low_risk_cases = 0
+        rerouted_max: list[float] = []
+        for bearing in bearings:
+            shifted: list[dict[str, Any]] = []
+            for item in projected:
+                copy = dict(item)
+                lat, lon = move_km(float(item["projected_lat"]), float(item["projected_lon"]), distance_km, float(bearing))
+                copy["projected_lat"] = lat
+                copy["projected_lon"] = lon
+                copy["ensemble"] = []
+                shifted.append(copy)
+            risk_grid = iceberg_risk_grid(shifted, target.shape)
+            base_path_risk = path_risk(base_path, risk_grid)
+            worst_baseline = max(worst_baseline, base_path_risk["max"])
+            worst_mean = max(worst_mean, base_path_risk["mean"])
+            if base_path_risk["max"] < 0.75:
+                baseline_low_risk_cases += 1
+            try:
+                reroute_path, reroute_cost = find_route(
+                    target, start, goal, risk_grid, vessel_profile,
+                    dataset["navigable_mask"], objective="balanced"
+                )
+                successful += 1
+                rerouted_max.append(path_risk(reroute_path, risk_grid)["max"])
+            except ValueError:
+                pass
+        scenarios.append({
+            "perturbation_km": distance_km,
+            "directions_tested": len(bearings),
+            "reroute_success_rate": successful / len(bearings),
+            "baseline_path_below_high_iceberg_risk_rate": baseline_low_risk_cases / len(bearings),
+            "worst_case_baseline_path_max_iceberg_risk": round(worst_baseline, 4),
+            "worst_case_baseline_path_mean_iceberg_risk": round(worst_mean, 4),
+            "worst_case_rerouted_max_iceberg_risk": round(max(rerouted_max), 4) if rerouted_max else None,
+        })
+
+    return {
+        "status": "completed",
+        "method": "Deterministic radial sensitivity test: 5/10/20 km perturbations across 8 bearings.",
+        "not_a_confidence_interval": True,
+        "horizon_days": horizon_days,
+        "vessel_profile": vessel_profile,
+        "baseline": {
+            "distance_km": round(_distance([{"lat": rc_to_latlon(r, c)[0], "lon": rc_to_latlon(r, c)[1]} for r, c in base_path]), 2),
+            "path_max_iceberg_risk": round(path_risk(base_path, base_risk)["max"], 4),
+            "waypoints": len(base_path),
+        },
+        "scenarios": scenarios,
+        "data": {
+            "dataset_kind": dataset["meta"].get("dataset_kind", ""),
+            "sea_ice_observation_date": dataset["meta"].get("observation_date", ""),
+            "iceberg_observation_date": dataset["meta"].get("iceberg_observation_date", ""),
+        },
+        "interpretation": "This is a sensitivity test, not a statistical confidence interval. Robustness is stronger when routes remain feasible and the baseline path avoids high iceberg-risk cells under the tested perturbations.",
+    }
+
+
+@app.get("/api/validation/status")
+def validation_status() -> dict[str, Any]:
+    """Expose what validation evidence is actually available locally."""
+    historical = BASE / "data" / "real" / "historical" / "byu_v8.0"
+    validation_dir = BASE.parent / "validation"
+    files = sorted(validation_dir.glob("*.json")) if validation_dir.exists() else []
+    return {
+        "historical_iceberg_archive_present": historical.exists() and any(historical.rglob("*.csv")),
+        "historical_seaice_files_present": any((BASE / "data" / "real" / "historical").rglob("*.nc")) if (BASE / "data" / "real" / "historical").exists() else False,
+        "completed_validation_reports": [f.name for f in files],
+        "scientific_claim_policy": "No accuracy metric is claimed unless it is produced from held-out historical observations.",
     }
 
 
@@ -1204,7 +1359,15 @@ def voyage_simulation(
     )]
     path = selected["path"]
     # Risk grid at the selected forecast horizon; iceberg projection is performed once.
-    forecast = forecast_concentration(dataset["concentration"], int(dataset["meta"].get("day_of_year", 1)), dataset["lat_grid"], horizon_days)
+    forecast = forecast_concentration(
+        dataset["concentration"],
+        int(dataset["meta"].get("day_of_year", 1)),
+        dataset["lat_grid"],
+        horizon_days,
+        current_u=dataset["current_u"], current_v=dataset["current_v"],
+        wind_u=dataset["wind_u"], wind_v=dataset["wind_v"],
+        lon_grid=dataset["lon_grid"],
+    )
     projected = project_icebergs(dataset["icebergs"], horizon_days * 24)
     risk = iceberg_risk_grid(projected, forecast[horizon_days - 1].shape)
     concentration = forecast[horizon_days - 1]
