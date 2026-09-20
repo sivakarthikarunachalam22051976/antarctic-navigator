@@ -473,74 +473,73 @@ def main() -> None:
                     recommendation.get("available")
                 )
 
-                # ...the rest of this validation stays here...
-        # A genuine recommendation is valid only when the backend
-        # has explicitly marked one of A/B/C as available.
-        if recommendation_available:
-            if recommendation_route_id not in {"A", "B", "C"}:
-                raise SystemExit(
-                    f"Invalid recommendation route for "
-                    f"{vessel_key}/{mission_key}: "
-                    f"{recommendation_route_id!r}"
-                )
+                # A genuine recommendation is valid only when the backend
+                # has explicitly marked one of A/B/C as available.
+                if recommendation_available:
+                    if recommendation_route_id not in {"A", "B", "C"}:
+                        raise SystemExit(
+                            f"Invalid recommendation route for "
+                            f"{vessel_key}/{mission_key}: "
+                            f"{recommendation_route_id!r}"
+                        )
 
-            recommended_candidate = next(
-                (
-                    candidate
-                    for candidate in alternatives
-                    if candidate.get("id") == recommendation_route_id
-                ),
-                None,
-            )
+                    recommended_candidate = next(
+                        (
+                            candidate
+                            for candidate in alternatives
+                            if candidate.get("id") == recommendation_route_id
+                        ),
+                        None,
+                    )
 
-            if recommended_candidate is None:
-                raise SystemExit(
-                    f"Recommendation route "
-                    f"{recommendation_route_id!r} was not found "
-                    f"in alternatives for {vessel_key}/{mission_key}."
-                )
+                    if recommended_candidate is None:
+                        raise SystemExit(
+                            f"Recommendation route "
+                            f"{recommendation_route_id!r} was not found "
+                            f"in alternatives for {vessel_key}/{mission_key}."
+                        )
 
-            if not recommended_candidate.get("recommendation_eligible"):
-                raise SystemExit(
-                    f"Backend recommended an ineligible route "
-                    f"{recommendation_route_id} for "
-                    f"{vessel_key}/{mission_key}."
-                )
+                    if not recommended_candidate.get("recommendation_eligible"):
+                        raise SystemExit(
+                            f"Backend recommended an ineligible route "
+                            f"{recommendation_route_id} for "
+                            f"{vessel_key}/{mission_key}."
+                        )
 
-        else:
-            # No recommendation is a VALID outcome when all candidates
-            # fail the selected hard safety constraints.
-            if recommendation_route_id is not None:
-                raise SystemExit(
-                    f"Recommendation marked unavailable but still "
-                    f"returned route_id={recommendation_route_id!r} "
-                    f"for {vessel_key}/{mission_key}."
-                )
+                else:
+                    # No recommendation is a VALID outcome when all candidates
+                    # fail the selected hard safety constraints.
+                    if recommendation_route_id is not None:
+                        raise SystemExit(
+                            f"Recommendation marked unavailable but still "
+                            f"returned route_id={recommendation_route_id!r} "
+                            f"for {vessel_key}/{mission_key}."
+                        )
 
-            if result.get("decision_status") != (
-                "NO_ROUTE_SATISFIES_SELECTED_SAFETY_CONSTRAINTS"
-            ):
-                raise SystemExit(
-                    f"Missing no-recommendation decision status for "
-                    f"{vessel_key}/{mission_key}."
-                )
+                    if result.get("decision_status") != (
+                        "NO_ROUTE_SATISFIES_SELECTED_SAFETY_CONSTRAINTS"
+                    ):
+                        raise SystemExit(
+                            f"Missing no-recommendation decision status for "
+                            f"{vessel_key}/{mission_key}."
+                        )
 
-            best_available = result.get(
-                "best_available_alternative"
-            )
+                    best_available = result.get(
+                        "best_available_alternative"
+                    )
 
-            if not best_available:
-                raise SystemExit(
-                    f"Missing best_available_alternative for "
-                    f"{vessel_key}/{mission_key}."
-                )
+                    if not best_available:
+                        raise SystemExit(
+                            f"Missing best_available_alternative for "
+                            f"{vessel_key}/{mission_key}."
+                        )
 
-            if best_available.get("route_id") not in {"A", "B", "C"}:
-                raise SystemExit(
-                    f"Invalid best available alternative for "
-                    f"{vessel_key}/{mission_key}: "
-                    f"{best_available.get('route_id')!r}"
-                )
+                    if best_available.get("route_id") not in {"A", "B", "C"}:
+                        raise SystemExit(
+                            f"Invalid best available alternative for "
+                            f"{vessel_key}/{mission_key}: "
+                            f"{best_available.get('route_id')!r}"
+                        )
 
 
         for priority_key in ("safety_first", "balanced", "time_sensitive"):
