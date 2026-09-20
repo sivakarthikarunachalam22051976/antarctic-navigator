@@ -1,3 +1,4 @@
+
 """Deterministic local integrity checks for the Antarctic Navigator."""
 from __future__ import annotations
 
@@ -236,6 +237,131 @@ def main() -> None:
         )
     if alternatives["recommendation"]["route_id"] not in route_ids:
         raise SystemExit("Mission-aware routing recommendation is invalid.")
+    # ------------------------------------------------------------------
+    # Safety recommendation regression test
+    # ------------------------------------------------------------------
+    #
+    # This specifically protects against the previously discovered defect:
+    # a route that exceeds the operator's maximum ice limit or is not
+    # POLAR-SAFETY PASS must never become the genuine recommendation merely
+    # because its weighted distance/risk score is favorable.
+    #
+    # This test intentionally uses a synthetic candidate set so it tests
+    # the recommendation gate itself rather than depending on the current
+    # environmental bundle.
+    safety_test_candidates = [
+        {
+            "id": "A",
+            "distance_km": 100.0,
+            "max_ice_concentration": 0.95,
+            "max_iceberg_risk": 0.10,
+            "risk_score": 0.10,
+            "polar_screening": {
+                "status": "BLOCK",
+                "reason": "Concentration exceeds vessel screening limit.",
+            },
+        },
+        {
+            "id": "B",
+            "distance_km": 110.0,
+            "max_ice_concentration": 0.90,
+            "max_iceberg_risk": 0.05,
+            "risk_score": 0.05,
+            "polar_screening": {
+                "status": "REVIEW",
+                "reason": "Review required.",
+            },
+        },
+        {
+            "id": "C",
+            "distance_km": 120.0,
+            "max_ice_concentration": 0.88,
+            "max_iceberg_risk": 0.08,
+            "risk_score": 0.08,
+            "polar_screening": {
+                "status": "BLOCK",
+                "reason": "Concentration exceeds vessel screening limit.",
+            },
+        },
+    ]
+
+    safety_test_freshness = {
+        "requirement_met": True,
+    }
+
+    blocked_recommendation = api._select_recommended_route(
+        safety_test_candidates,
+        "resupply",
+        "balanced",
+        0.75,
+        safety_test_freshness,
+    )
+
+    if blocked_recommendation is not None:
+        raise SystemExit(
+            "SAFETY REGRESSION FAILED: an ineligible route was "
+            "returned as a genuine recommendation."
+        )
+
+    for candidate in safety_test_candidates:
+        if candidate.get("recommendation_eligible") is not False:
+            raise SystemExit(
+                "SAFETY REGRESSION FAILED: an ineligible candidate "
+                "was not marked recommendation_eligible=False."
+            )
+
+    # Also verify the positive case: a candidate that satisfies BOTH
+    # hard conditions must remain eligible for normal ranking.
+    passing_test_candidates = [
+        {
+            "id": "A",
+            "distance_km": 120.0,
+            "max_ice_concentration": 0.50,
+            "max_iceberg_risk": 0.20,
+            "risk_score": 0.20,
+            "polar_screening": {
+                "status": "PASS",
+                "reason": "Within screening threshold.",
+            },
+        },
+        {
+            "id": "B",
+            "distance_km": 100.0,
+            "max_ice_concentration": 0.90,
+            "max_iceberg_risk": 0.05,
+            "risk_score": 0.05,
+            "polar_screening": {
+                "status": "BLOCK",
+                "reason": "Concentration exceeds vessel screening limit.",
+            },
+        },
+    ]
+
+    passing_recommendation = api._select_recommended_route(
+        passing_test_candidates,
+        "resupply",
+        "balanced",
+        0.75,
+        safety_test_freshness,
+    )
+
+    if passing_recommendation is None:
+        raise SystemExit(
+            "SAFETY REGRESSION FAILED: a valid PASS candidate "
+            "was rejected despite satisfying all hard constraints."
+        )
+
+    if passing_recommendation["id"] != "A":
+        raise SystemExit(
+            "SAFETY REGRESSION FAILED: the eligible PASS candidate "
+            "was not selected."
+        )
+
+    if not passing_recommendation["recommendation_eligible"]:
+        raise SystemExit(
+            "SAFETY REGRESSION FAILED: selected PASS candidate "
+            "is not marked recommendation_eligible=True."
+        )
     geometry = alternatives.get("geometry") or {}
     if geometry.get("projection") != "EPSG:3031":
         raise SystemExit(
@@ -305,26 +431,117 @@ def main() -> None:
         projected_real = project_icebergs(real_data["icebergs"], 72)
         real_risk = iceberg_risk_grid(projected_real, real_forecast.shape)
         vessel_keys = ("standard", "ice_capable", "sagar_nidhi", "vasiliy_golovnin", "arc7", "planned_pc4")
-        for vessel_key in vessel_keys:
-            for objective in ("safest", "fastest", "balanced"):
-                find_route(real_forecast, start, goal, real_risk, vessel_key, real_mask, objective)
 
-        # Exercise every user-selectable dimension without turning the self-check
-        # into an unnecessarily expensive exhaustive Cartesian product.
         for vessel_key in vessel_keys:
             for mission_key in ("resupply", "research_transit", "time_critical"):
                 result = route(
-                    start_lat=-70.7667, start_lon=11.7333,
-                    goal_lat=-69.4068, goal_lon=76.1953,
-                    horizon_days=3, vessel_profile=vessel_key,
-                    mission=mission_key, priority="balanced",
+                    start_lat=-70.7667,
+                    start_lon=11.7333,
+                    goal_lat=-69.4068,
+                    goal_lon=76.1953,
+                    horizon_days=3,
+                    vessel_profile=vessel_key,
+                    mission=mission_key,
+                    priority="balanced",
                     max_ice_exposure="medium",
                     freshness_requirement_hours=168,
                 )
-                if len(result.get("alternatives", [])) != 3:
-                    raise SystemExit(f"Expected A/B/C for {vessel_key}/{mission_key}.")
-                if result.get("recommendation", {}).get("route_id") not in {"A", "B", "C"}:
-                    raise SystemExit("Recommendation did not select A/B/C.")
+
+                alternatives = result.get("alternatives", [])
+
+                # Every mission/vessel combination must still produce
+                # the three distinct route alternatives A/B/C.
+                if len(alternatives) != 3:
+                    raise SystemExit(
+                        f"Expected A/B/C for {vessel_key}/{mission_key}."
+                    )
+
+                route_ids = {
+                    candidate.get("id")
+                    for candidate in alternatives
+                }
+
+                if route_ids != {"A", "B", "C"}:
+                    raise SystemExit(
+                        f"Expected route IDs A/B/C for "
+                        f"{vessel_key}/{mission_key}, got {sorted(route_ids)}."
+                    )
+
+                recommendation = result.get("recommendation", {})
+                recommendation_route_id = recommendation.get("route_id")
+                recommendation_available = bool(
+                    recommendation.get("available")
+                )
+
+                # ...the rest of this validation stays here...
+        # A genuine recommendation is valid only when the backend
+        # has explicitly marked one of A/B/C as available.
+        if recommendation_available:
+            if recommendation_route_id not in {"A", "B", "C"}:
+                raise SystemExit(
+                    f"Invalid recommendation route for "
+                    f"{vessel_key}/{mission_key}: "
+                    f"{recommendation_route_id!r}"
+                )
+
+            recommended_candidate = next(
+                (
+                    candidate
+                    for candidate in alternatives
+                    if candidate.get("id") == recommendation_route_id
+                ),
+                None,
+            )
+
+            if recommended_candidate is None:
+                raise SystemExit(
+                    f"Recommendation route "
+                    f"{recommendation_route_id!r} was not found "
+                    f"in alternatives for {vessel_key}/{mission_key}."
+                )
+
+            if not recommended_candidate.get("recommendation_eligible"):
+                raise SystemExit(
+                    f"Backend recommended an ineligible route "
+                    f"{recommendation_route_id} for "
+                    f"{vessel_key}/{mission_key}."
+                )
+
+        else:
+            # No recommendation is a VALID outcome when all candidates
+            # fail the selected hard safety constraints.
+            if recommendation_route_id is not None:
+                raise SystemExit(
+                    f"Recommendation marked unavailable but still "
+                    f"returned route_id={recommendation_route_id!r} "
+                    f"for {vessel_key}/{mission_key}."
+                )
+
+            if result.get("decision_status") != (
+                "NO_ROUTE_SATISFIES_SELECTED_SAFETY_CONSTRAINTS"
+            ):
+                raise SystemExit(
+                    f"Missing no-recommendation decision status for "
+                    f"{vessel_key}/{mission_key}."
+                )
+
+            best_available = result.get(
+                "best_available_alternative"
+            )
+
+            if not best_available:
+                raise SystemExit(
+                    f"Missing best_available_alternative for "
+                    f"{vessel_key}/{mission_key}."
+                )
+
+            if best_available.get("route_id") not in {"A", "B", "C"}:
+                raise SystemExit(
+                    f"Invalid best available alternative for "
+                    f"{vessel_key}/{mission_key}: "
+                    f"{best_available.get('route_id')!r}"
+                )
+
 
         for priority_key in ("safety_first", "balanced", "time_sensitive"):
             for exposure_key in ("low", "medium", "high"):

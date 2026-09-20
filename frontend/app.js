@@ -445,8 +445,46 @@ function routeDistanceText(candidate) {
 
 async function loadVoyageSimulation(data) {
   const container = document.getElementById("voyage-result");
-  if (!container || !data?.requested_start || !data?.requested_goal) return;
-  container.innerHTML = `<div class="voyage-loading">Running vessel performance simulation…</div>`;
+  if (!container || !data?.requested_start || !data?.requested_goal) {
+    return;
+  }
+
+  // A voyage simulation is meaningful only when the backend has produced
+  // a genuine recommendation that passed the hard safety gate.
+  if (!data.recommendation?.available || !data.recommendation?.route_id) {
+    const best = data.best_available_alternative || {};
+    const screen = best.polar_screening || {};
+
+    container.innerHTML = `
+      <div class="voyage-card muted">
+        <div class="voyage-header">
+          <span class="eyebrow">Voyage intelligence</span>
+          <strong>Not run</strong>
+        </div>
+
+        <div class="screening-row screen-block">
+          <strong>No route passed the selected safety constraints</strong>
+          <span>
+            Voyage simulation is withheld because there is no qualified
+            recommended route. The best available alternative remains
+            for human review only.
+          </span>
+        </div>
+
+        <div class="voyage-notice">
+          Best available: Route ${escapeHtml(best.route_id || "—")}
+          ${screen.status
+            ? ` · Polar screening: ${escapeHtml(screen.status)}`
+            : ""}
+        </div>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = `
+    <div class="voyage-loading">
+      Running vessel performance simulation…
+    </div>`;
 
   const query = new URLSearchParams({
     start_lat: data.requested_start.lat,
@@ -458,102 +496,480 @@ async function loadVoyageSimulation(data) {
     mission: document.getElementById("mission-profile").value,
     priority: document.getElementById("route-priority").value,
     max_ice_exposure: document.getElementById("max-ice-exposure").value,
-    freshness_requirement_hours: document.getElementById("freshness-requirement").value,
+    freshness_requirement_hours:
+      document.getElementById("freshness-requirement").value,
   });
 
   try {
-    const payload = await fetchJson(`/api/voyage-simulation?${query}`, ROUTE_TIMEOUT_MS);
+    const payload = await fetchJson(
+      `/api/voyage-simulation?${query}`,
+      ROUTE_TIMEOUT_MS,
+    );
+
     const sim = payload.simulation || {};
     const screen = payload.screening || {};
-    const alertCount = Array.isArray(sim.alerts) ? sim.alerts.length : 0;
+    const alertCount = Array.isArray(sim.alerts)
+      ? sim.alerts.length
+      : 0;
+
+    if (
+      payload.recommendation_available !== true ||
+      !payload.route_id
+    ) {
+      container.innerHTML = `
+        <div class="voyage-card muted">
+          <div class="voyage-header">
+            <span class="eyebrow">Voyage intelligence</span>
+            <strong>Not run</strong>
+          </div>
+          <div class="screening-row screen-block">
+            <strong>No qualified route available</strong>
+            <span>${escapeHtml(
+              payload.notice ||
+              "Voyage simulation was withheld because no route passed the selected hard safety constraints.",
+            )}</span>
+          </div>
+        </div>`;
+      return;
+    }
+
     container.innerHTML = `
       <div class="voyage-card">
         <div class="voyage-header">
           <span class="eyebrow">Voyage intelligence</span>
-          <strong>Route ${escapeHtml(payload.route_id || "—")}</strong>
+          <strong>Route ${escapeHtml(payload.route_id)}</strong>
         </div>
+
         <div class="voyage-metrics">
-          <div><span>Model ETA</span><strong>${Number(sim.eta_days || 0).toFixed(2)} d</strong></div>
-          <div><span>Speed model</span><strong>${Number(sim.vessel?.design_speed_kn || 0).toFixed(1)} kn</strong></div>
-          <div><span>Fuel proxy</span><strong>${Number(sim.estimated_fuel_t || 0).toFixed(1)} t</strong></div>
-          <div><span>Alerts</span><strong>${alertCount}</strong></div>
+          <div>
+            <span>Model ETA</span>
+            <strong>${Number(sim.eta_days || 0).toFixed(2)} d</strong>
+          </div>
+
+          <div>
+            <span>Speed model</span>
+            <strong>${Number(
+              sim.vessel?.design_speed_kn || 0,
+            ).toFixed(1)} kn</strong>
+          </div>
+
+          <div>
+            <span>Fuel proxy</span>
+            <strong>${Number(
+              sim.estimated_fuel_t || 0,
+            ).toFixed(1)} t</strong>
+          </div>
+
+          <div>
+            <span>Alerts</span>
+            <strong>${alertCount}</strong>
+          </div>
         </div>
-        <div class="screening-row ${screen.status === "BLOCK" ? "screen-block" : screen.status === "REVIEW" ? "screen-review" : "screen-pass"}">
-          <strong>Polar safety screening: ${escapeHtml(screen.status || "UNKNOWN")}</strong>
-          <span>${escapeHtml(screen.reason || "Screening result unavailable")}</span>
+
+        <div class="screening-row ${
+          screen.status === "BLOCK"
+            ? "screen-block"
+            : screen.status === "REVIEW"
+              ? "screen-review"
+              : "screen-pass"
+        }">
+          <strong>
+            Polar safety screening:
+            ${escapeHtml(screen.status || "UNKNOWN")}
+          </strong>
+
+          <span>
+            ${escapeHtml(
+              screen.reason ||
+              "Screening result unavailable",
+            )}
+          </span>
         </div>
-        <div class="voyage-notice">${escapeHtml(sim.fuel_basis || payload.notice || "Planning estimate only.")}</div>
+
+        <div class="voyage-notice">
+          ${escapeHtml(
+            sim.fuel_basis ||
+            payload.notice ||
+            "Planning estimate only.",
+          )}
+        </div>
       </div>`;
   } catch (error) {
-    container.innerHTML = `<div class="voyage-card muted">Voyage simulation unavailable: ${escapeHtml(error.message)}</div>`;
+    container.innerHTML = `
+      <div class="voyage-card muted">
+        Voyage simulation unavailable:
+        ${escapeHtml(error.message)}
+      </div>`;
   }
 }
 
 function renderRouteAlternatives(data) {
   const result = document.getElementById("route-result");
+
   routeCandidates = data.alternatives || [];
-  recommendedRouteId = data.recommendation?.route_id || (routeCandidates[0]?.id ?? null);
+
+  // IMPORTANT:
+  // Do NOT fall back to alternatives[0].
+  // A missing recommendation means exactly that: no candidate passed
+  // the backend's hard safety gate.
+  recommendedRouteId =
+    data.recommendation?.available === true &&
+    data.recommendation?.route_id
+      ? data.recommendation.route_id
+      : null;
+
+  const bestAvailableId =
+    data.best_available_alternative?.route_id || null;
 
   if (!routeCandidates.length) {
-    result.innerHTML = `<span class="err">No route candidates were returned.</span>`;
+    result.innerHTML =
+      `<span class="err">No route candidates were returned.</span>`;
     return;
   }
 
+  // Highlight the genuine recommendation when one exists.
+  // Otherwise highlight nothing as "recommended"; the best available
+  // alternative is presented explicitly below.
   renderAllRoutes(recommendedRouteId);
 
-  const recommended = routeCandidates.find((item) => item.id === recommendedRouteId) || routeCandidates[0];
-  const missionLabel = data.mission_label || data.mission || "Mission";
-  const priorityLabel = data.priority_label || data.priority || "Balanced";
+  const recommended = recommendedRouteId
+    ? routeCandidates.find(
+        (item) => item.id === recommendedRouteId,
+      )
+    : null;
+
+  const bestAvailable = bestAvailableId
+    ? routeCandidates.find(
+        (item) => item.id === bestAvailableId,
+      )
+    : null;
+
+  const missionLabel =
+    data.mission_label || data.mission || "Mission";
+
+  const priorityLabel =
+    data.priority_label || data.priority || "Balanced";
+
   const freshnessText = data.freshness?.requirement_met
     ? `Met (<${data.freshness_requirement_hours}h)`
     : `Not fully met (<${data.freshness_requirement_hours}h)`;
 
-  const rows = routeCandidates.map((candidate) => {
-    const style = ROUTE_STYLES[candidate.id] || ROUTE_STYLES.C;
-    const selected = candidate.id === recommendedRouteId;
-    const exposure = candidate.exposure_band || riskBand(candidate.risk_score);
-    const objective = candidate.label || "Route";
-    const distance = Number(candidate.distance_km || 0).toFixed(0);
-    const meanIce = (100 * Number(candidate.mean_ice_concentration || 0)).toFixed(0);
-    const maxIce = (100 * Number(candidate.max_ice_concentration || 0)).toFixed(0);
-    const icebergRisk = (100 * Number(candidate.max_iceberg_risk || 0)).toFixed(0);
-    const distanceText = routeDistanceText(candidate);
+    const iceToleranceLabel =
+    data.max_ice_exposure_label ||
+    data.max_ice_exposure ||
+    "—";
 
-    return `
-      <tr class="route-table-row ${selected ? "recommended" : ""}" data-route-id="${escapeHtml(candidate.id)}" tabindex="0" role="button" aria-label="Select Route ${escapeHtml(candidate.id)} — ${escapeHtml(objective)}" style="--route-accent:${style.color}">
-        <th scope="row">
-          <span class="route-id">Route ${escapeHtml(candidate.id)}</span>
-          <span class="route-objective">${escapeHtml(objective)}</span>
-          ${selected ? `<span class="recommended-tag">RECOMMENDED</span>` : ""}
-        </th>
-        <td>${distance} km<span class="table-subtext">${escapeHtml(distanceText)}</span></td>
-        <td>${meanIce}%</td>
-        <td>${maxIce}%</td>
-        <td>${icebergRisk}%</td>
-        <td><span class="exposure-badge exposure-${exposure.toLowerCase()}">${escapeHtml(exposure)}</span></td>
-      </tr>`;
-  }).join("");
+  const iceToleranceLimitPct =
+    Number.isFinite(Number(data.max_ice_exposure_limit_pct))
+      ? Number(data.max_ice_exposure_limit_pct).toFixed(0)
+      : "—";
 
-  const explanation = (recommended.explanation || [])
-    .map((reason) => `<li>${escapeHtml(reason)}</li>`)
+  const rows = routeCandidates
+    .map((candidate) => {
+      const style =
+        ROUTE_STYLES[candidate.id] || ROUTE_STYLES.C;
+
+      const isRecommended =
+        candidate.id === recommendedRouteId;
+
+      const isBestAvailable =
+        candidate.id === bestAvailableId;
+
+      const exposure =
+        candidate.exposure_band ||
+        riskBand(candidate.risk_score);
+
+      const objective = candidate.label || "Route";
+
+      const distance = Number(
+        candidate.distance_km || 0,
+      ).toFixed(0);
+
+      const meanIce = (
+        100 *
+        Number(candidate.mean_ice_concentration || 0)
+      ).toFixed(0);
+
+      const maxIce = (
+        100 *
+        Number(candidate.max_ice_concentration || 0)
+      ).toFixed(0);
+
+      const icebergRisk = (
+        100 *
+        Number(candidate.max_iceberg_risk || 0)
+      ).toFixed(0);
+
+      const distanceText =
+        routeDistanceText(candidate);
+
+      const screening =
+        candidate.polar_screening || {};
+
+      const screeningStatus =
+        String(screening.status || "UNKNOWN")
+          .toUpperCase();
+
+      let routeTag = "";
+
+      if (isRecommended) {
+        routeTag =
+          `<span class="recommended-tag">RECOMMENDED</span>`;
+      } else if (
+        !recommendedRouteId &&
+        isBestAvailable
+      ) {
+        routeTag =
+          `<span class="recommended-tag">BEST AVAILABLE</span>`;
+      }
+
+      return `
+        <tr
+          class="route-table-row ${
+            isRecommended ? "recommended" : ""
+          }"
+          data-route-id="${escapeHtml(candidate.id)}"
+          tabindex="0"
+          role="button"
+          aria-label="Select Route ${escapeHtml(
+            candidate.id,
+          )} — ${escapeHtml(objective)}"
+          style="--route-accent:${style.color}"
+        >
+          <th scope="row">
+            <span class="route-id">
+              Route ${escapeHtml(candidate.id)}
+            </span>
+
+            <span class="route-objective">
+              ${escapeHtml(objective)}
+            </span>
+
+            ${routeTag}
+          </th>
+
+          <td>
+            ${distance} km
+            <span class="table-subtext">
+              ${escapeHtml(distanceText)}
+            </span>
+          </td>
+
+          <td>${meanIce}%</td>
+          <td>${maxIce}%</td>
+          <td>${icebergRisk}%</td>
+
+          <td>
+            <span class="exposure-badge exposure-${exposure.toLowerCase()}">
+              ${escapeHtml(exposure)}
+            </span>
+            <span class="table-subtext">
+              ${escapeHtml(screeningStatus)}
+            </span>
+          </td>
+        </tr>`;
+    })
     .join("");
 
   const dataUsed = data.data_used || {};
 
+  const displayedRoute =
+    recommended || bestAvailable || routeCandidates[0];
+
+  const explanation = displayedRoute?.explanation || [];
+
+  const explanationHtml = explanation.length
+    ? explanation
+        .map(
+          (reason) =>
+            `<li>${escapeHtml(reason)}</li>`,
+        )
+        .join("")
+    : "<li>No additional explanation was returned.</li>";
+
+  let decisionCard = "";
+
+  if (recommended) {
+    decisionCard = `
+      <div class="recommendation-card">
+        <div class="recommendation-title">
+          <span>Recommended Route</span>
+          <strong>
+            Route ${escapeHtml(recommended.id)}
+            — ${escapeHtml(recommended.label)}
+          </strong>
+        </div>
+
+        <div class="recommendation-metrics">
+          <div>
+            <span>Distance</span>
+            <strong>
+              ${recommended.distance_km.toFixed(0)} km
+            </strong>
+          </div>
+
+          <div>
+            <span>Mean ice</span>
+            <strong>
+              ${(100 * recommended.mean_ice_concentration).toFixed(0)}%
+            </strong>
+          </div>
+
+          <div>
+            <span>Max ice</span>
+            <strong>
+              ${(100 * recommended.max_ice_concentration).toFixed(0)}%
+            </strong>
+          </div>
+
+          <div>
+            <span>Max iceberg risk</span>
+            <strong>
+              ${(100 * recommended.max_iceberg_risk).toFixed(0)}%
+            </strong>
+          </div>
+        </div>
+
+        <div class="recommendation-why">
+          <strong>Why selected?</strong>
+          <ul>${explanationHtml}</ul>
+        </div>
+
+        <div class="route-assessment ${
+          String(
+            recommended.route_assessment || "",
+          ).startsWith("High")
+            ? "route-warning"
+            : "muted"
+        }">
+          ${escapeHtml(
+            recommended.route_assessment ||
+            "Safety assessment unavailable.",
+          )}
+        </div>
+      </div>`;
+  } else {
+    const alternative =
+      bestAvailable || routeCandidates[0];
+
+    const alternativeScreen =
+      alternative?.polar_screening || {};
+
+    decisionCard = `
+      <div class="recommendation-card">
+        <div class="recommendation-title">
+          <span>No qualifying recommendation</span>
+          <strong>
+            No route satisfies all selected safety constraints
+          </strong>
+        </div>
+
+        <div class="recommendation-metrics">
+          <div>
+            <span>Best available</span>
+            <strong>
+              Route ${escapeHtml(
+                alternative?.id || "—",
+              )}
+            </strong>
+          </div>
+
+          <div>
+            <span>Max ice</span>
+            <strong>
+              ${(
+                100 *
+                Number(
+                  alternative?.max_ice_concentration || 0,
+                )
+              ).toFixed(0)}%
+            </strong>
+          </div>
+
+          <div>
+            <span>Selected tolerance</span>
+            <strong>
+              ${escapeHtml(iceToleranceLabel)}
+            </strong>
+          </div>
+
+          <div>
+            <span>Screening threshold</span>
+            <strong>
+              ${escapeHtml(iceToleranceLimitPct)}%
+            </strong>
+          </div>
+
+          <div>
+            <span>Polar screening</span>
+            <strong>
+              ${escapeHtml(
+                alternativeScreen.status ||
+                "UNKNOWN",
+              )}
+            </strong>
+          </div>
+        </div>
+
+        <div class="recommendation-why">
+          <strong>Decision status</strong>
+          <ul>
+            <li>
+              No candidate passed both the selected maximum-ice
+              exposure limit and vessel-aware polar safety screening.
+            </li>
+            <li>
+              Route ${escapeHtml(
+                alternative?.id || "—",
+              )} is shown only as the best available alternative.
+            </li>
+            <li>
+              Human review is required before any operational use.
+            </li>
+          </ul>
+        </div>
+
+        <div class="route-assessment route-warning">
+          ${escapeHtml(
+            alternative?.route_assessment ||
+            "Safety assessment unavailable.",
+          )}
+        </div>
+      </div>`;
+  }
+
   result.innerHTML = `
     <div class="route-result-header">
       <div>
-        <span class="eyebrow">Route decision support</span>
-        <strong>3 candidate routes evaluated</strong>
+        <span class="eyebrow">
+          Route decision support
+        </span>
+
+        <strong>
+          3 candidate routes evaluated
+        </strong>
       </div>
-      <span class="route-status-chip">${escapeHtml(data.vessel_profile || "Vessel")}</span>
+
+      <span class="route-status-chip">
+        ${escapeHtml(
+          data.vessel_profile || "Vessel",
+        )}
+      </span>
     </div>
 
     <div class="route-context">
       <span>${escapeHtml(missionLabel)}</span>
       <span>${escapeHtml(priorityLabel)}</span>
-      <span>Max ice ${escapeHtml(data.max_ice_exposure_label || "75%")}</span>
-      <span>Freshness ${escapeHtml(freshnessText)}</span>
+      <span>
+        Ice tolerance
+        ${escapeHtml(iceToleranceLabel)}
+        <span class="table-subtext">
+          (${escapeHtml(iceToleranceLimitPct)}% screening threshold)
+        </span>
+      </span>
+      <span>
+        Freshness ${escapeHtml(freshnessText)}
+      </span>
     </div>
 
     <div class="route-table-wrap">
@@ -568,56 +984,92 @@ function renderRouteAlternatives(data) {
             <th>Exposure</th>
           </tr>
         </thead>
+
         <tbody>${rows}</tbody>
       </table>
     </div>
 
-    <div class="recommendation-card">
-      <div class="recommendation-title">
-        <span>Recommended Route</span>
-        <strong>Route ${escapeHtml(recommended.id)} — ${escapeHtml(recommended.label)}</strong>
-      </div>
-      <div class="recommendation-metrics">
-        <div><span>Distance</span><strong>${recommended.distance_km.toFixed(0)} km</strong></div>
-        <div><span>Mean ice</span><strong>${(100 * recommended.mean_ice_concentration).toFixed(0)}%</strong></div>
-        <div><span>Max ice</span><strong>${(100 * recommended.max_ice_concentration).toFixed(0)}%</strong></div>
-        <div><span>Max iceberg risk</span><strong>${(100 * recommended.max_iceberg_risk).toFixed(0)}%</strong></div>
-      </div>
-      <div class="recommendation-why">
-        <strong>Why selected?</strong>
-        <ul>${explanation || "<li>Selected by the mission-aware recommendation layer.</li>"}</ul>
-      </div>
-      <div class="route-assessment ${recommended.route_assessment.startsWith("High") ? "route-warning" : "muted"}">${escapeHtml(recommended.route_assessment)}</div>
-    </div>
+    ${decisionCard}
 
     <div class="data-used">
-      <strong>Environmental evidence used</strong>
-      <span>NSIDC ${escapeHtml(dataUsed.sea_ice?.observation_date || "—")}</span>
-      <span>USNIC ${escapeHtml(dataUsed.icebergs?.observation_date || "—")}</span>
-      <span>OSCAR ${escapeHtml(dataUsed.currents?.observation_date || "—")}</span>
-      <span>ERA5 ${escapeHtml(dataUsed.wind?.analysis_date || "—")}</span>
+      <strong>
+        Environmental evidence used
+      </strong>
+
+      <span>
+        NSIDC
+        ${escapeHtml(
+          dataUsed.sea_ice?.observation_date || "—",
+        )}
+      </span>
+
+      <span>
+        USNIC
+        ${escapeHtml(
+          dataUsed.icebergs?.observation_date || "—",
+        )}
+      </span>
+
+      <span>
+        OSCAR
+        ${escapeHtml(
+          dataUsed.currents?.observation_date || "—",
+        )}
+      </span>
+
+      <span>
+        ERA5
+        ${escapeHtml(
+          dataUsed.wind?.analysis_date || "—",
+        )}
+      </span>
     </div>
 
-    <div class="human-review-note">Human-in-the-loop: route output is decision support, not autonomous navigation.</div>
+    <div class="human-review-note">
+      ${
+        recommended
+          ? "Human-in-the-loop: route output is decision support, not autonomous navigation."
+          : "Human-in-the-loop: no route passed all selected hard safety constraints. The displayed alternative is not an operational recommendation."
+      }
+    </div>
   `;
 
   const selectRoute = (row) => {
     const selectedId = row.dataset.routeId;
+
     renderAllRoutes(selectedId);
-    result.querySelectorAll(".route-table-row").forEach((item) => {
-      item.classList.toggle("selected", item.dataset.routeId === selectedId);
-    });
+
+    result
+      .querySelectorAll(".route-table-row")
+      .forEach((item) => {
+        item.classList.toggle(
+          "selected",
+          item.dataset.routeId === selectedId,
+        );
+      });
   };
 
-  result.querySelectorAll(".route-table-row").forEach((row) => {
-    row.addEventListener("click", () => selectRoute(row));
-    row.addEventListener("keydown", (event) => {
-      if (event.key === "Enter" || event.key === " ") {
-        event.preventDefault();
-        selectRoute(row);
-      }
+  result
+    .querySelectorAll(".route-table-row")
+    .forEach((row) => {
+      row.addEventListener(
+        "click",
+        () => selectRoute(row),
+      );
+
+      row.addEventListener(
+        "keydown",
+        (event) => {
+          if (
+            event.key === "Enter" ||
+            event.key === " "
+          ) {
+            event.preventDefault();
+            selectRoute(row);
+          }
+        },
+      );
     });
-  });
 }
 
 document.querySelectorAll(".station-btn").forEach((button) => {

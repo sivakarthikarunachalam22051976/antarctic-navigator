@@ -1,4 +1,4 @@
-"""Antarctic Navigator FastAPI backend."""
+﻿"""Antarctic Navigator FastAPI backend."""
 from __future__ import annotations
 
 import json
@@ -558,7 +558,7 @@ def _route_metrics(
     max_iceberg_risk = float(risk_values.max())
     risk_score = _route_risk_score(mean_ice, max_ice, max_iceberg_risk)
     assessment = (
-        "High environmental exposure - human review required before operation."
+        "High environmental exposure - human review required before operational use."
         if max_ice >= 0.90 or max_iceberg_risk >= 0.75
         else "Moderate environmental exposure - review recommended."
         if max_ice >= 0.75 or max_iceberg_risk >= 0.40
@@ -685,22 +685,79 @@ def _select_recommended_route(
     priority: str,
     max_ice_limit: float,
     freshness: dict[str, Any],
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
+    """
+    Select a genuinely eligible route for recommendation.
+
+    A route is eligible for an operational-style recommendation only when
+    BOTH hard safety conditions are satisfied:
+
+    1. Its maximum modeled sea-ice concentration is within the operator's
+       selected maximum-ice exposure limit.
+    2. Its vessel-aware polar safety screening status is PASS.
+
+    Freshness is intentionally NOT a hard eligibility gate here. A freshness
+    failure remains a human-review warning because data freshness and route
+    environmental safety are different conditions.
+
+    If no candidate satisfies both hard conditions, return None. The caller
+    may still identify a "best available alternative" for transparent human
+    review, but that route must never be presented as a genuine recommendation.
+    """
+    if not candidates:
+        return None
+
     fastest_distance = min(candidate["distance_km"] for candidate in candidates)
     weights = _mission_weights(mission, priority)
 
+    eligible_candidates: list[dict[str, Any]] = []
+
     for candidate in candidates:
-        distance_ratio = candidate["distance_km"] / max(fastest_distance, 1e-9)
-        exceedance = max(0.0, candidate["max_ice_concentration"] - max_ice_limit)
-        freshness_penalty = 0.18 if not freshness["requirement_met"] and weights["freshness"] > 0 else 0.0
+        # These fields are computed here before selection so the eligibility
+        # decision can never depend on a value that is populated afterwards.
+        candidate["within_max_ice_exposure"] = (
+            candidate["max_ice_concentration"] <= max_ice_limit
+        )
+
+        polar_screening = candidate.get("polar_screening") or {}
+        candidate["polar_screening_pass"] = (
+            str(polar_screening.get("status", "")).upper() == "PASS"
+        )
+
+        candidate["recommendation_eligible"] = (
+            candidate["within_max_ice_exposure"]
+            and candidate["polar_screening_pass"]
+        )
+
+        distance_ratio = (
+            candidate["distance_km"] / max(fastest_distance, 1e-9)
+        )
+
+        exceedance = max(
+            0.0,
+            candidate["max_ice_concentration"] - max_ice_limit,
+        )
+
+        freshness_penalty = (
+            0.18
+            if (
+                not freshness["requirement_met"]
+                and weights["freshness"] > 0
+            )
+            else 0.0
+        )
+
         limit_penalty = exceedance * 2.5
-        candidate["distance_over_shortest_pct"] = max(0.0, (distance_ratio - 1.0) * 100.0)
+
+        candidate["distance_over_shortest_pct"] = max(
+            0.0,
+            (distance_ratio - 1.0) * 100.0,
+        )
 
         if priority == "safety_first":
-            # Safety-first is intentionally lexicographic: first reduce modeled
-            # environmental risk, then exposure limit exceedance, then distance.
-            # This makes the operator's stated priority dominate small travel-time
-            # differences while keeping the result explainable.
+            # Safety-first ranking remains lexicographic among ELIGIBLE
+            # candidates. Hard safety eligibility has already been enforced
+            # above, so a blocked route can never win this branch.
             candidate["selection_score"] = (
                 candidate["risk_score"]
                 + 0.55 * candidate["max_iceberg_risk"]
@@ -717,11 +774,20 @@ def _select_recommended_route(
                 + freshness_penalty
             )
 
+        if candidate["recommendation_eligible"]:
+            eligible_candidates.append(candidate)
+
+    # CRITICAL SAFETY RULE:
+    # Never return a blocked / over-limit / non-PASS route as the genuine
+    # recommendation.
+    if not eligible_candidates:
+        return None
+
     if priority == "safety_first":
         # Stable tie-breaking keeps safety first, then lower iceberg exposure,
         # then shorter distance.
         return min(
-            candidates,
+            eligible_candidates,
             key=lambda item: (
                 item["risk_score"],
                 item["max_iceberg_risk"],
@@ -729,9 +795,10 @@ def _select_recommended_route(
             ),
         )
 
-    return min(candidates, key=lambda item: item["selection_score"])
-
-
+    return min(
+        eligible_candidates,
+        key=lambda item: item["selection_score"],
+    )
 # ---------------------------------------------------------------------------
 # API
 # ---------------------------------------------------------------------------
@@ -1071,12 +1138,41 @@ def route(
         freshness,
     )
 
-    fastest_distance = min(item["distance_km"] for item in candidates)
+    fastest_distance = min(
+        item["distance_km"]
+        for item in candidates
+    )
+
     for candidate in candidates:
         candidate["distance_over_shortest_pct"] = (
-            max(0.0, (candidate["distance_km"] / max(fastest_distance, 1e-9) - 1.0) * 100.0)
+            max(
+                0.0,
+                (
+                    candidate["distance_km"]
+                    / max(fastest_distance, 1e-9)
+                    - 1.0
+                )
+                * 100.0,
+            )
         )
-        candidate["within_max_ice_exposure"] = candidate["max_ice_concentration"] <= max_ice_limit
+
+        # These values are deliberately assigned for EVERY candidate before
+        # the response is built. This keeps the API internally consistent
+        # whether or not a genuine recommendation exists.
+        candidate["within_max_ice_exposure"] = (
+            candidate["max_ice_concentration"] <= max_ice_limit
+        )
+
+        polar_screening = candidate.get("polar_screening") or {}
+        candidate["polar_screening_pass"] = (
+            str(polar_screening.get("status", "")).upper() == "PASS"
+        )
+
+        candidate["recommendation_eligible"] = (
+            candidate["within_max_ice_exposure"]
+            and candidate["polar_screening_pass"]
+        )
+
         candidate["explanation"] = _route_explanation(
             candidate,
             candidates,
@@ -1084,48 +1180,119 @@ def route(
             freshness["requirement_met"],
             candidate["objective"],
         )
-        candidate["selection_score"] = round(float(candidate.get("selection_score", 0.0)), 4)
+
+        candidate["selection_score"] = round(
+            float(candidate.get("selection_score", 0.0)),
+            4,
+        )
+
+        # Internal routing coordinates are not part of the public API.
         candidate.pop("_path_rc", None)
 
-    recommended["recommended"] = True
-    recommended["recommendation_reason"] = (
-        "Best mission-aware trade-off between transit distance and modeled environmental exposure "
-        f"for {MISSION_PROFILES[mission]['label'].lower()} with {PRIORITY_PROFILES[priority]['label'].lower()} priority."
+    # ------------------------------------------------------------------
+    # Genuine recommendation vs best available alternative
+    # ------------------------------------------------------------------
+    #
+    # If no route satisfies BOTH hard safety conditions, there is deliberately
+    # NO recommendation. We still expose the best-scoring candidate so the
+    # human operator can see what the planner found, but it is explicitly
+    # labelled as an alternative requiring review.
+    #
+    def _best_available_key(item: dict[str, Any]) -> tuple[float, float, float]:
+        return (
+            float(item.get("selection_score", float("inf"))),
+            float(item.get("risk_score", float("inf"))),
+            float(item.get("distance_km", float("inf"))),
+        )
+
+    best_available = min(
+        candidates,
+        key=_best_available_key,
     )
 
+    recommendation_available = recommended is not None
+
+    if recommendation_available:
+        recommended["recommended"] = True
+        recommended["recommendation_reason"] = (
+            "Best mission-aware trade-off between transit distance and "
+            "modeled environmental exposure for "
+            f"{MISSION_PROFILES[mission]['label'].lower()} with "
+            f"{PRIORITY_PROFILES[priority]['label'].lower()} priority."
+        )
+
+        display_route = recommended
+        recommendation_reason = recommended["recommendation_reason"]
+    else:
+        # Absolutely no candidate is allowed to acquire the "recommended"
+        # flag when all candidates fail the hard safety gate.
+        for candidate in candidates:
+            candidate["recommended"] = False
+
+        display_route = best_available
+        recommendation_reason = (
+            "No candidate satisfies all selected hard safety constraints. "
+            "The best available alternative is shown for human review only; "
+            "it is not an operational recommendation."
+        )
+
     return {
-        "path": recommended["path"],
-        "waypoints": recommended["waypoints"],
-        "total_cost": recommended["total_cost"],
-        "distance_km": recommended["distance_km"],
-        "mean_ice_concentration": recommended["mean_ice_concentration"],
-        "max_ice_concentration": recommended["max_ice_concentration"],
-        "high_ice_fraction": recommended["high_ice_fraction"],
-        "max_iceberg_risk": recommended["max_iceberg_risk"],
-        "risk_score": recommended["risk_score"],
-        "exposure_band": recommended["exposure_band"],
-        "route_assessment": recommended["route_assessment"],
-        "hard_ice_cells": recommended["hard_ice_cells"],
-        "horizon_days": recommended["horizon_days"],
-        "vessel_profile": recommended["vessel_profile"],
-        "forecast_dataset": recommended["forecast_dataset"],
-        "requested_start": recommended["requested_start"],
-        "requested_goal": recommended["requested_goal"],
-        "used_start": recommended["used_start"],
-        "used_goal": recommended["used_goal"],
-        "start_snapped_to_ocean": recommended["start_snapped_to_ocean"],
-        "goal_snapped_to_ocean": recommended["goal_snapped_to_ocean"],
-        "trajectory_basis": recommended["trajectory_basis"],
+        "path": display_route["path"],
+        "waypoints": display_route["waypoints"],
+        "total_cost": display_route["total_cost"],
+        "distance_km": display_route["distance_km"],
+        "mean_ice_concentration": display_route["mean_ice_concentration"],
+        "max_ice_concentration": display_route["max_ice_concentration"],
+        "high_ice_fraction": display_route["high_ice_fraction"],
+        "max_iceberg_risk": display_route["max_iceberg_risk"],
+        "risk_score": display_route["risk_score"],
+        "exposure_band": display_route["exposure_band"],
+        "route_assessment": display_route["route_assessment"],
+        "hard_ice_cells": display_route["hard_ice_cells"],
+        "horizon_days": display_route["horizon_days"],
+        "vessel_profile": display_route["vessel_profile"],
+        "forecast_dataset": display_route["forecast_dataset"],
+        "requested_start": display_route["requested_start"],
+        "requested_goal": display_route["requested_goal"],
+        "used_start": display_route["used_start"],
+        "used_goal": display_route["used_goal"],
+        "start_snapped_to_ocean": display_route["start_snapped_to_ocean"],
+        "goal_snapped_to_ocean": display_route["goal_snapped_to_ocean"],
+        "trajectory_basis": display_route["trajectory_basis"],
         "geometry": {
             "projection": "EPSG:3031",
-            "start_xy_m": [round(v, 1) for v in polar_stereographic_xy(start_lat, start_lon)],
-            "goal_xy_m": [round(v, 1) for v in polar_stereographic_xy(goal_lat, goal_lon)],
+            "start_xy_m": [
+                round(v, 1)
+                for v in polar_stereographic_xy(
+                    start_lat,
+                    start_lon,
+                )
+            ],
+            "goal_xy_m": [
+                round(v, 1)
+                for v in polar_stereographic_xy(
+                    goal_lat,
+                    goal_lon,
+                )
+            ],
         },
         "intelligence": {
-            "sea_ice_forecast": "Hybrid persistence + seasonal correction + semi-Lagrangian environmental advection when forcing is available",
-            "iceberg_trajectory": "Physics-informed free-drift + RK4 integration + uncertainty ensemble",
-            "ship_performance": "Lindqvist-inspired relative ice-resistance planning model",
-            "safety_layer": "Vessel-aware polar safety screening; POLARIS is reference context only",
+            "sea_ice_forecast": (
+                "Hybrid persistence + seasonal correction + "
+                "semi-Lagrangian environmental advection when forcing "
+                "is available"
+            ),
+            "iceberg_trajectory": (
+                "Physics-informed free-drift + RK4 integration + "
+                "uncertainty ensemble"
+            ),
+            "ship_performance": (
+                "Lindqvist-inspired relative ice-resistance planning model"
+            ),
+            "safety_layer": (
+                "Vessel-aware polar safety screening; POLARIS is "
+                "reference context only"
+            ),
             "machine_learning": False,
             "autonomous_control": False,
         },
@@ -1134,41 +1301,115 @@ def route(
         "priority": priority,
         "priority_label": PRIORITY_PROFILES[priority]["label"],
         "max_ice_exposure": max_ice_exposure,
-        "max_ice_exposure_label": f"{int(max_ice_limit * 100)}%",
+        "max_ice_exposure_label": {
+            "low": "Low",
+            "medium": "Medium",
+            "high": "High",
+        }.get(max_ice_exposure, str(max_ice_exposure).title()),
+        "max_ice_exposure_limit_pct": int(round(max_ice_limit * 100)),
         "freshness_requirement_hours": freshness_requirement_hours,
         "freshness": freshness,
+
+        # --------------------------------------------------------------
+        # CRITICAL: null route_id means there is NO genuine recommendation.
+        # The frontend must never replace this with alternatives[0].
+        # --------------------------------------------------------------
         "recommendation": {
-            "route_id": recommended["id"],
-            "label": recommended["label"],
-            "reason": recommended["recommendation_reason"],
+            "available": recommendation_available,
+            "route_id": (
+                recommended["id"]
+                if recommended is not None
+                else None
+            ),
+            "label": (
+                recommended["label"]
+                if recommended is not None
+                else None
+            ),
+            "reason": recommendation_reason,
         },
+
+        # Always expose the best available route separately when there is
+        # no qualifying recommendation. This is useful decision-support
+        # information but is explicitly NOT a recommendation.
+        "best_available_alternative": {
+            "route_id": best_available["id"],
+            "label": best_available["label"],
+            "within_max_ice_exposure": (
+                best_available["within_max_ice_exposure"]
+            ),
+            "polar_screening": (
+                best_available.get("polar_screening") or {}
+            ),
+            "recommendation_eligible": (
+                best_available["recommendation_eligible"]
+            ),
+        },
+
         "alternatives": candidates,
+
         "data_used": {
             "sea_ice": {
                 "source": dataset["meta"].get("source", ""),
-                "observation_date": dataset["meta"].get("observation_date", ""),
+                "observation_date": dataset["meta"].get(
+                    "observation_date",
+                    "",
+                ),
             },
             "icebergs": {
-                "source": dataset["meta"].get("iceberg_source", ""),
-                "observation_date": dataset["meta"].get("iceberg_observation_date", ""),
+                "source": dataset["meta"].get(
+                    "iceberg_source",
+                    "",
+                ),
+                "observation_date": dataset["meta"].get(
+                    "iceberg_observation_date",
+                    "",
+                ),
             },
             "currents": {
-                "source": dataset["meta"].get("current_source", ""),
-                "observation_date": dataset["meta"].get("current_observation_date", ""),
+                "source": dataset["meta"].get(
+                    "current_source",
+                    "",
+                ),
+                "observation_date": dataset["meta"].get(
+                    "current_observation_date",
+                    "",
+                ),
             },
             "wind": {
-                "source": dataset["meta"].get("wind_source", ""),
-                "analysis_date": dataset["meta"].get("wind_observation_date", ""),
+                "source": dataset["meta"].get(
+                    "wind_source",
+                    "",
+                ),
+                "analysis_date": dataset["meta"].get(
+                    "wind_observation_date",
+                    "",
+                ),
             },
         },
-        "human_review_required": (
-            not freshness["requirement_met"]
-            or not recommended["within_max_ice_exposure"]
-            or recommended["route_assessment"].startswith("High")
-        ),
-        "candidate_warnings": route_errors,
-    }
 
+        "human_review_required": (
+            not recommendation_available
+            or not freshness["requirement_met"]
+            or not display_route["within_max_ice_exposure"]
+            or display_route["route_assessment"].startswith("High")
+            or str(
+                display_route.get("polar_screening", {}).get(
+                    "status",
+                    "",
+                )
+            ).upper()
+            != "PASS"
+        ),
+
+        "candidate_warnings": route_errors,
+
+        "decision_status": (
+            "RECOMMENDATION_AVAILABLE"
+            if recommendation_available
+            else "NO_ROUTE_SATISFIES_SELECTED_SAFETY_CONSTRAINTS"
+        ),
+    }
 
 
 @app.get("/api/validation/robustness")
@@ -1345,31 +1586,115 @@ def voyage_simulation(
     max_ice_exposure: str = Query("medium"),
     freshness_requirement_hours: int = Query(48, ge=0, le=168),
 ) -> dict[str, Any]:
-    """Compute a route first, then run an hourly-ish vessel performance simulation."""
+    """
+    Compute a route first, then run an hourly-ish vessel performance
+    simulation only for a genuinely recommended route.
+
+    If no candidate passes the hard recommendation gate, voyage simulation
+    is intentionally not performed. This prevents a blocked/non-qualified
+    route from being presented as though it were an approved selection.
+    """
     result = route(
-        start_lat=start_lat, start_lon=start_lon, goal_lat=goal_lat, goal_lon=goal_lon,
-        horizon_days=horizon_days, vessel_profile=vessel_profile, mission=mission,
-        priority=priority, max_ice_exposure=max_ice_exposure,
+        start_lat=start_lat,
+        start_lon=start_lon,
+        goal_lat=goal_lat,
+        goal_lon=goal_lon,
+        horizon_days=horizon_days,
+        vessel_profile=vessel_profile,
+        mission=mission,
+        priority=priority,
+        max_ice_exposure=max_ice_exposure,
         freshness_requirement_hours=freshness_requirement_hours,
     )
+
+    recommendation = result.get("recommendation") or {}
+
+    if not recommendation.get("available"):
+        best_available = result.get(
+            "best_available_alternative"
+        ) or {}
+
+        return {
+            "route_id": None,
+            "route_label": None,
+            "recommendation_available": False,
+            "best_available_alternative": best_available,
+            "vessel_profile": vessel_profile,
+            "simulation": None,
+            "screening": (
+                best_available.get("polar_screening")
+                if isinstance(best_available, dict)
+                else {}
+            ),
+            "human_review_required": True,
+            "notice": (
+                "Voyage simulation was not run because no candidate "
+                "route passed all selected hard safety constraints. "
+                "The best available alternative remains for human review "
+                "only."
+            ),
+        }
+
+    route_id = recommendation.get("route_id")
+
+    selected = next(
+        (
+            item
+            for item in result["alternatives"]
+            if item["id"] == route_id
+            and item.get("recommendation_eligible") is True
+            and item.get("recommended") is True
+        ),
+        None,
+    )
+
+    if selected is None:
+        # Defensive invariant check. Under the corrected route() contract
+        # this should never happen, but failing closed is safer than
+        # accidentally simulating an unqualified route.
+        return {
+            "route_id": None,
+            "route_label": None,
+            "recommendation_available": False,
+            "best_available_alternative": result.get(
+                "best_available_alternative"
+            ),
+            "vessel_profile": vessel_profile,
+            "simulation": None,
+            "screening": {},
+            "human_review_required": True,
+            "notice": (
+                "Voyage simulation was not run because the selected "
+                "recommendation failed the final safety-consistency check."
+            ),
+        }
+
     dataset = get_dataset()
-    selected = result["alternatives"][next(
-        i for i, item in enumerate(result["alternatives"])
-        if item["id"] == result["recommendation"]["route_id"]
-    )]
-    path = selected["path"]
-    # Risk grid at the selected forecast horizon; iceberg projection is performed once.
+
+    # Risk grid at the selected forecast horizon; iceberg projection is
+    # performed once.
     forecast = forecast_concentration(
         dataset["concentration"],
         int(dataset["meta"].get("day_of_year", 1)),
         dataset["lat_grid"],
         horizon_days,
-        current_u=dataset["current_u"], current_v=dataset["current_v"],
-        wind_u=dataset["wind_u"], wind_v=dataset["wind_v"],
+        current_u=dataset["current_u"],
+        current_v=dataset["current_v"],
+        wind_u=dataset["wind_u"],
+        wind_v=dataset["wind_v"],
         lon_grid=dataset["lon_grid"],
     )
-    projected = project_icebergs(dataset["icebergs"], horizon_days * 24)
-    risk = iceberg_risk_grid(projected, forecast[horizon_days - 1].shape)
+
+    projected = project_icebergs(
+        dataset["icebergs"],
+        horizon_days * 24,
+    )
+
+    risk = iceberg_risk_grid(
+        projected,
+        forecast[horizon_days - 1].shape,
+    )
+
     concentration = forecast[horizon_days - 1]
 
     def concentration_at(lat: float, lon: float) -> float:
@@ -1380,18 +1705,38 @@ def voyage_simulation(
         row, col = latlon_to_rc(lat, lon)
         return float(risk[row, col])
 
-    simulation = simulate_voyage(path, vessel_profile, concentration_at, risk_at)
-    return {
-        "route_id": result["recommendation"]["route_id"],
-        "route_label": result["recommendation"]["label"],
-        "vessel_profile": vessel_profile,
-        "vessel": ADVANCED_VESSELS.get(vessel_profile, ADVANCED_VESSELS["standard"]),
-        "simulation": simulation,
-        "screening": polar_safety_screen(vessel_profile, selected["max_ice_concentration"]),
-        "human_review_required": True,
-        "notice": "Planning simulation only; fuel and ETA are model estimates, not measured operational performance.",
-    }
+    simulation = simulate_voyage(
+        selected["path"],
+        vessel_profile,
+        concentration_at,
+        risk_at,
+    )
 
+    screening = polar_safety_screen(
+        vessel_profile,
+        selected["max_ice_concentration"],
+    )
+
+    return {
+        "route_id": selected["id"],
+        "route_label": selected["label"],
+        "recommendation_available": True,
+        "vessel_profile": vessel_profile,
+        "vessel": ADVANCED_VESSELS.get(
+            vessel_profile,
+            ADVANCED_VESSELS["standard"],
+        ),
+        "simulation": simulation,
+        "screening": screening,
+        "human_review_required": (
+            not result["freshness"]["requirement_met"]
+            or selected["route_assessment"].startswith("High")
+        ),
+        "notice": (
+            "Planning simulation only; fuel and ETA are model estimates, "
+            "not measured operational performance."
+        ),
+    }
 
 @app.post("/api/reload")
 def reload_dataset() -> dict[str, str]:
